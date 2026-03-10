@@ -1,4 +1,4 @@
-// index.js — النسخة الكاملة مع نظام الصلاحيات ولوحة التحكم
+// index.js — النسخة الكاملة المُصلحة
 
 const {
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder,
@@ -40,7 +40,6 @@ function saveData(d) { fs.writeFileSync(DATA_FILE, JSON.stringify(d, null, 2), '
 let db = loadData();
 
 // ─── نظام الصلاحيات ───
-// المستويات: owner(3) > supervisor(2) > admin(1)
 function getBotRole(uid)      { return db.botUsers[uid]?.role || 0; }
 function isBotOwner(uid)      { return getBotRole(uid) >= 3; }
 function isBotSupervisor(uid) { return getBotRole(uid) >= 2; }
@@ -137,6 +136,7 @@ function storeRating(adminId, adminTag, stars, ticketName, memberTag) {
     if (!db.ratings[adminId]) db.ratings[adminId] = { tag: adminTag, total: 0, count: 0, history: [] };
     const d = db.ratings[adminId];
     d.total += stars; d.count++;
+    d.tag = adminTag;
     d.history.push({ stars, ticketName, memberTag, time: Date.now() });
     if (d.history.length > 20) d.history.shift();
     saveData(db);
@@ -396,24 +396,69 @@ client.on('messageCreate', async message => {
     // ─── إحصائيات ───
     if (cmd === 'إحصائيات') {
         if (!isAdm) return message.reply({ content: '❌ للمسؤولين فقط.' });
-        const tid = message.mentions.users.first()?.id ?? (args[0]&&/^\d+$/.test(args[0])?args[0]:null);
-        if (!tid) return message.reply({ content: '❌ الاستخدام: `-إحصائيات @الاداري` أو بالـ ID' });
-        let u; try { u = await client.users.fetch(tid); } catch { return message.reply({ content: '❌ المستخدم غير موجود.' }); }
+
+        let tid = null;
+        const mentioned = message.mentions.users.first();
+        if (mentioned) {
+            tid = mentioned.id;
+        } else if (args[0] && /^\d{17,20}$/.test(args[0])) {
+            tid = args[0];
+        }
+
+        if (!tid) return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('📖 استخدام الأمر')
+            .setDescription('❌ الاستخدام:\n`-إحصائيات @الاداري`\n`-إحصائيات 123456789012345678`')
+        ]});
+
+        let u;
+        try { u = await client.users.fetch(tid); }
+        catch { return message.reply({ content: '❌ المستخدم غير موجود.' }); }
+
         const d = db.ratings[tid];
-        if (!d||!d.count) return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setDescription(`❌ لا توجد تقييمات لـ **${u.tag}**`)] });
-        const avg  = (d.total/d.count).toFixed(1);
-        const hist = d.history.slice(-5).reverse().map((r,i)=>
-            `**${i+1}.** ${'⭐'.repeat(r.stars)} — \`${r.ticketName}\` | ${r.memberTag} | <t:${Math.floor(r.time/1000)}:R>`
-        ).join('\n');
+        const p = db.points[tid];
+        const pointCount = p ? p.count : 0;
+        const rank = Object.entries(db.points).sort((a, b) => b[1].count - a[1].count).findIndex(([id]) => id === tid) + 1;
+
+        if ((!d || !d.count) && !p) {
+            return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245')
+                .setAuthor({ name: u.tag, iconURL: u.displayAvatarURL({ dynamic: true }) })
+                .setDescription(`❌ لا توجد بيانات لـ **${u.tag}** حتى الآن.\n\nلا تقييمات ولا نقاط مسجلة.`)
+                .setTimestamp()
+            ]});
+        }
+
+        const avg = (d && d.count) ? (d.total / d.count).toFixed(1) : '0.0';
+        const avgStars = (d && d.count) ? '⭐'.repeat(Math.round(d.total / d.count)) : '—';
+        const ratingCount = d ? d.count : 0;
+
+        const hist = (d && d.history && d.history.length > 0)
+            ? d.history.slice(-5).reverse().map((r, i) =>
+                `**${i + 1}.** ${'⭐'.repeat(r.stars)} — \`${r.ticketName}\` | ${r.memberTag} | <t:${Math.floor(r.time / 1000)}:R>`
+            ).join('\n')
+            : '> لا توجد تقييمات مسجلة بعد';
+
+        const absStatus = isAbsent(tid) ? '🔴 غائب' : '🟢 متاح';
+
+        const botRole = getBotRole(tid);
+        const roleLabel = botRole === 3 ? '👑 مالك' : botRole === 2 ? '🔱 مشرف' : botRole === 1 ? '🛡️ إداري' : '👤 عضو';
+
         await message.reply({ embeds: [new EmbedBuilder().setColor('#5865F2')
-            .setAuthor({ name: `إحصائيات ${u.tag}`, iconURL: u.displayAvatarURL({dynamic:true}) })
-            .setThumbnail(u.displayAvatarURL({dynamic:true,size:256})).setTitle('📊 إحصائيات الإداري')
+            .setAuthor({ name: `إحصائيات ${u.tag}`, iconURL: u.displayAvatarURL({ dynamic: true }) })
+            .setThumbnail(u.displayAvatarURL({ dynamic: true, size: 256 }))
+            .setTitle('📊 الإحصائيات الكاملة')
             .addFields(
-                { name: '👤 الإداري',     value: `<@${tid}>`, inline: true },
-                { name: '🎫 التقييمات',  value: `\`${d.count}\``, inline: true },
-                { name: '⭐ المتوسط',     value: `\`${avg}/5\``, inline: true },
-                { name: '🕐 آخر 5 تقييمات', value: hist||'لا يوجد', inline: false }
-            ).setTimestamp()
+                { name: '👤 الإداري', value: `<@${tid}>`, inline: true },
+                { name: '🏷️ الرتبة', value: roleLabel, inline: true },
+                { name: '📡 الحالة', value: absStatus, inline: true },
+                { name: '🎫 التكتات المُنجزة', value: `\`${pointCount}\``, inline: true },
+                { name: '🏆 الترتيب', value: rank > 0 ? `\`#${rank}\`` : '`—`', inline: true },
+                { name: '⭐ متوسط التقييم', value: `\`${avg}/5\` ${avgStars}`, inline: true },
+                { name: '📝 عدد التقييمات', value: `\`${ratingCount}\``, inline: true },
+                { name: '\u200b', value: '\u200b', inline: true },
+                { name: '\u200b', value: '\u200b', inline: true },
+                { name: '🕐 آخر 5 تقييمات', value: hist, inline: false }
+            )
+            .setFooter({ text: `طلب بواسطة ${message.author.tag}` })
+            .setTimestamp()
         ]});
     }
 
@@ -549,9 +594,43 @@ client.on('messageCreate', async message => {
     if (cmd === 'تذكير') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const h = parseInt(args[0]);
-        if (!h||h<1||h>72) return message.reply({ content: '❌ الاستخدام: `-تذكير 2` (من 1 إلى 72)' });
+        if (!h || h < 1 || h > 72) return message.reply({ content: '❌ الاستخدام: `-تذكير 2` (من 1 إلى 72)' });
         setSetting('reminderHours', h);
-        await message.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription(`✅ وقت التذكير → **${h} ساعة**`)] });
+        await message.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription(`✅ وقت التذكير → **${h} ساعة**\n\n⏳ جاري إرسال التذكيرات الآن للتكتات المتأخرة...`)] });
+
+        let sentCount = 0;
+        for (const [cid, lastTime] of lastMemberMessage.entries()) {
+            if (Date.now() - lastTime < h * 3600000) continue;
+            const ch = message.guild.channels.cache.get(cid);
+            if (!ch || ch.name.startsWith('closed-')) {
+                lastMemberMessage.delete(cid);
+                continue;
+            }
+            const ownerId = ch.topic;
+            if (!ownerId) continue;
+            const owner = await message.guild.members.fetch(ownerId).catch(() => null);
+            if (!owner) continue;
+
+            reminderSent.add(cid);
+            await owner.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('⏰ تذكير — لديك تكت مفتوح!')
+                .setDescription(`مرحباً **${owner.user.username}**،\n\nلم يتم الرد على تكتك منذ فترة.\nالرجاء التفاعل وإلا قد يُغلق.`)
+                .addFields(
+                    { name: '📋 التكت', value: `\`${ch.name}\``, inline: true },
+                    { name: '⏱️ آخر رد منك', value: `<t:${Math.floor(lastTime / 1000)}:R>`, inline: true }
+                ).setTimestamp()
+            ]}).catch(() => {});
+
+            await ch.send({ embeds: [new EmbedBuilder().setColor('#FEE75C')
+                .setDescription(`⏰ **تم إرسال تذكير لـ <@${ownerId}> — آخر رد كان <t:${Math.floor(lastTime / 1000)}:R>**`).setTimestamp()
+            ]}).catch(() => {});
+            sentCount++;
+        }
+
+        if (sentCount === 0) {
+            await message.channel.send({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription('✅ لا توجد تكتات متأخرة حالياً. الإعداد تم حفظه.')] });
+        } else {
+            await message.channel.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setDescription(`📨 تم إرسال **${sentCount}** تذكير للأعضاء المتأخرين.`)] });
+        }
     }
 
     // ─── غائب / متاح ───
@@ -723,7 +802,7 @@ client.on('interactionCreate', async interaction => {
 
     // ── ملاحظة DM ──
     if (interaction.isButton() && interaction.customId.startsWith('dm_note_')) {
-        return interaction.showModal(new ModalBuilder().setCustomId(`note_modal_${interaction.customId.split('_').pop()}`).setTitle('📝 ملاحظة للإدارة')
+        return interaction.showModal(new ModalBuilder().setCustomId(`note_modal_${interaction.customId.replace('dm_note_','')}`).setTitle('📝 ملاحظة للإدارة')
             .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note_text').setLabel('ملاحظتك').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500)))
         );
     }
@@ -969,7 +1048,6 @@ async function sendTicketRequest(interaction, serviceKey, priorityKey, title, de
         )]});
         pendingTickets.set(reqMsg.id, { userId: member.user.id, serviceKey, priorityKey, title, description, guildId: guild.id, requestedAt: Date.now() });
 
-        // تنبيه 15 دقيقة
         setTimeout(async () => {
             if (!pendingTickets.has(reqMsg.id)) return;
             const logs = guild.channels.cache.get(LOGS_CHANNEL_ID);
@@ -1075,13 +1153,20 @@ async function handleTicketClose(interaction) {
             ]}).then(()=>{ dmSent=true; }).catch(()=>{});
             setTimeout(async () => {
                 await owner.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('⭐ كيف كانت تجربتك؟')
-                    .setDescription(`${cl?`🛡️ الإداري: \`${cl.adminTag}\`\n\n`:''}اختر تقييمك:`)
-                    .setFooter({ text: 'يمكنك إضافة ملاحظة بالضغط أدناه' })
+                    .setDescription(`نتمنى نسمع رأيك عن الخدمة المقدمة!`)
+                    .addFields(
+                        { name: '🛡️ الإداري', value: cl ? `\`${cl.adminTag}\`` : 'غير محدد', inline: true },
+                        { name: '📋 التكت', value: `\`${ch.name}\``, inline: true },
+                        { name: '⏱️ المدة', value: dur, inline: true }
+                    )
+                    .setFooter({ text: 'اختر تقييمك من الأزرار أدناه • يمكنك إضافة ملاحظة أيضاً' })
                 ], components: [
                     createRatingComponents(),
-                    new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`dm_note_${oid}_${ch.id}`).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝'))
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`dm_note_${oid}_${ch.id}`).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+                    )
                 ]}).catch(()=>{});
-            }, 30*60*1000);
+            }, 30 * 60 * 1000);
         }
         await sendLog(interaction.guild, new EmbedBuilder().setColor(dmSent?'#57F287':'#ED4245').setTitle('🔒 تكت مُغلق')
             .addFields(
@@ -1107,8 +1192,9 @@ async function handleTicketClose(interaction) {
 
 async function archiveChannel(ch, interaction, oid, duration) {
     try {
-        ticketOpenTime.delete(ch.id); ticketClaimer.delete(ch.id);
+        ticketOpenTime.delete(ch.id);
         ticketOwnerMap.delete(ch.id); lastMemberMessage.delete(ch.id); reminderSent.delete(ch.id);
+        // لا نحذف ticketClaimer هنا عشان التقييم يقدر يلاقي الإداري
         await ch.setParent(ARCHIVE_CATEGORY_ID, { lockPermissions: false });
         await ch.setName(`closed-${ch.name.replace(/^[🟢🟡🔴]/,'')}`);
         await ch.permissionOverwrites.set([
@@ -1131,23 +1217,105 @@ async function archiveChannel(ch, interaction, oid, duration) {
 // ===============================================
 
 async function handleRating(interaction) {
-    const stars = parseInt(interaction.customId.replace('rate_',''));
-    const txt   = '⭐'.repeat(stars);
-    const match = interaction.message.embeds[0]?.description?.match(/`([^`]+)`/);
-    const ctag  = match?.[1];
+    const stars = parseInt(interaction.customId.replace('rate_', ''));
+    const txt = '⭐'.repeat(stars);
     const guild = client.guilds.cache.first();
-    let aid     = null;
-    if (ctag) { const m = guild?.members.cache.find(x=>x.user.tag===ctag); if (m) { aid=m.id; storeRating(aid,ctag,stars,'تكت',interaction.user.tag); } }
-    const noteId = interaction.message.components[1]?.components[0]?.customId || 'dm_note_done';
+
+    let aid = null;
+    let adminTag = 'غير محدد';
+    const embedFields = interaction.message.embeds[0]?.fields || [];
+    const embedDesc = interaction.message.embeds[0]?.description || '';
+
+    // طريقة 1: البحث في الحقول عن اسم الإداري
+    for (const field of embedFields) {
+        if (field.name.includes('الإداري')) {
+            const tagMatch = field.value.match(/`([^`]+)`/);
+            if (tagMatch) {
+                adminTag = tagMatch[1];
+                if (guild) {
+                    const m = guild.members.cache.find(x => x.user.tag === adminTag || x.user.username === adminTag);
+                    if (m) { aid = m.id; adminTag = m.user.tag; }
+                }
+            }
+            const mentionMatch = field.value.match(/<@!?(\d+)>/);
+            if (mentionMatch && !aid) {
+                aid = mentionMatch[1];
+                try { const u = await client.users.fetch(aid); adminTag = u.tag; } catch {}
+            }
+            break;
+        }
+    }
+
+    // طريقة 2: البحث في الوصف
+    if (!aid) {
+        const descTagMatch = embedDesc.match(/`([^`\n]+)`/);
+        if (descTagMatch) {
+            adminTag = descTagMatch[1];
+            if (guild) {
+                const m = guild.members.cache.find(x => x.user.tag === adminTag || x.user.username === adminTag);
+                if (m) { aid = m.id; adminTag = m.user.tag; }
+            }
+        }
+    }
+
+    // طريقة 3: البحث من ticketClaimer عبر زر الملاحظة
+    if (!aid) {
+        const noteBtn = interaction.message.components?.[1]?.components?.[0];
+        if (noteBtn && noteBtn.customId && noteBtn.customId.startsWith('dm_note_')) {
+            const noteParts = noteBtn.customId.replace('dm_note_', '').split('_');
+            if (noteParts.length >= 2) {
+                const chId = noteParts[noteParts.length - 1];
+                const claimer = ticketClaimer.get(chId);
+                if (claimer) {
+                    aid = claimer.adminId;
+                    adminTag = claimer.adminTag;
+                }
+            }
+        }
+    }
+
+    // طريقة 4: بحث في بيانات النقاط لمطابقة الـ tag
+    if (!aid && adminTag !== 'غير محدد') {
+        for (const [adminId, data] of Object.entries(db.points)) {
+            if (data.tag === adminTag) {
+                aid = adminId;
+                break;
+            }
+        }
+    }
+
+    // طريقة 5: بحث في botUsers
+    if (!aid && adminTag !== 'غير محدد') {
+        for (const [adminId, data] of Object.entries(db.botUsers)) {
+            if (data.tag === adminTag) {
+                aid = adminId;
+                break;
+            }
+        }
+    }
+
+    // تسجيل التقييم
+    if (aid) {
+        storeRating(aid, adminTag, stars, 'تكت', interaction.user.tag);
+    }
+
+    const noteId = interaction.message.components?.[1]?.components?.[0]?.customId || 'dm_note_done';
+
     await interaction.update({
-        embeds: [new EmbedBuilder().setColor('#57F287').setTitle('✅ تم تسجيل تقييمك').setDescription(`${txt}\n\n**شكراً!** رأيك يساعدنا. 😊`).setTimestamp()],
-        components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(noteId).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝'))]
+        embeds: [new EmbedBuilder().setColor('#57F287').setTitle('✅ تم تسجيل تقييمك')
+            .setDescription(`${txt} **(${stars}/5)**\n\n${aid ? `🛡️ الإداري: <@${aid}> (\`${adminTag}\`)` : '🛡️ الإداري: غير محدد'}\n\n**شكراً لك!** رأيك يساعدنا على التحسين. 😊`)
+            .setTimestamp()
+        ],
+        components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(noteId).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝')
+        )]
     });
+
     await sendLog(guild, new EmbedBuilder().setColor('#FEE75C').setTitle('⭐ تقييم جديد')
         .addFields(
-            { name: '👤 العضو', value: `\`${interaction.user.tag}\``, inline:true },
-            { name: '⭐ التقييم', value: `${txt} (${stars}/5)`, inline:true },
-            { name: '🛡️ الإداري', value: aid?`<@${aid}>`:`\`${ctag||'غير محدد'}\``, inline:true }
+            { name: '👤 العضو', value: `\`${interaction.user.tag}\``, inline: true },
+            { name: '⭐ التقييم', value: `${txt} (${stars}/5)`, inline: true },
+            { name: '🛡️ الإداري', value: aid ? `<@${aid}> (\`${adminTag}\`)` : `\`${adminTag}\``, inline: true }
         ).setTimestamp()
     );
 }
