@@ -54,12 +54,6 @@ function hasPermission(member, level = 1) {
 function getSetting(k, def) { return db.settings[k] !== undefined ? db.settings[k] : def; }
 function setSetting(k, v)   { db.settings[k] = v; saveData(db); }
 
-// ─── Express أولاً عشان Render ما يكيل ─────
-const app  = express();
-const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(port, () => console.log(`✅ Web Server on port ${port}`));
-
 // ─── إنشاء الكلاينت ───
 const client = new Client({
     intents: [
@@ -997,7 +991,7 @@ client.on('guildMemberRemove', async member => {
 });
 
 // ===============================================
-// 13. الحماية والتشغيل
+// 13. الحماية والتشغيل — التعديل هنا
 // ===============================================
 
 process.on('unhandledRejection', err => {
@@ -1009,7 +1003,15 @@ process.on('uncaughtException', err => {
     console.error('Uncaught Exception:', err);
 });
 
-client.login(BOT_TOKEN).catch(err => {
-    console.error('❌ فشل تسجيل الدخول:', err.message);
-    process.exit(1);
+// ✅ التعديل: Express يشتغل أولاً ثم البوت يسجل دخوله
+const app  = express();
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is running!'));
+
+app.listen(port, () => {
+    console.log(`✅ Web Server on port ${port}`);
+    client.login(BOT_TOKEN).catch(err => {
+        console.error('❌ فشل تسجيل الدخول:', err.message);
+        process.exit(1);
+    });
 });
