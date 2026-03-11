@@ -1003,32 +1003,35 @@ process.on('uncaughtException', err => {
     console.error('Uncaught Exception:', err);
 });
 
+// تشغيل Express
 const app  = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(port, () => console.log(`✅ Web Server on port ${port}`));
 
-app.listen(port, () => {
-    console.log(`✅ Web Server on port ${port}`);
-
-    async function startBot(retries = 5) {
-        for (let i = 1; i <= retries; i++) {
-            try {
-                console.log(`⏳ محاولة تسجيل الدخول ${i}/${retries}...`);
-                await client.login(BOT_TOKEN);
-                console.log('✅ تم تسجيل الدخول بنجاح!');
-                return;
-            } catch (err) {
-                console.error(`❌ فشلت المحاولة ${i}:`, err.message);
-                if (i < retries) {
-                    console.log(`⏱️ انتظار 5 ثواني قبل المحاولة التالية...`);
-                    await new Promise(r => setTimeout(r, 5000));
-                } else {
-                    console.error('❌ فشلت كل المحاولات. إيقاف البوت.');
-                    process.exit(1);
-                }
+// تشغيل البوت بشكل مستقل مع retry و timeout
+async function startBot(retries = 10) {
+    for (let i = 1; i <= retries; i++) {
+        try {
+            console.log(`⏳ محاولة تسجيل الدخول ${i}/${retries}...`);
+            await Promise.race([
+                client.login(BOT_TOKEN),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000))
+            ]);
+            console.log('✅ تم تسجيل الدخول بنجاح!');
+            return;
+        } catch (err) {
+            console.error(`❌ فشلت المحاولة ${i}:`, err.message);
+            if (i < retries) {
+                const wait = i * 3000;
+                console.log(`⏱️ انتظار ${wait/1000} ثواني...`);
+                await new Promise(r => setTimeout(r, wait));
+            } else {
+                console.error('❌ فشلت كل المحاولات.');
+                process.exit(1);
             }
         }
     }
+}
 
-    startBot();
-});
+startBot();
