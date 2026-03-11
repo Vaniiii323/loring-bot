@@ -1003,15 +1003,14 @@ process.on('uncaughtException', err => {
     console.error('Uncaught Exception:', err);
 });
 
-// ✅ التعديل: Express يشتغل أولاً ثم البوت يسجل دخوله
 const app  = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot is running!'));
 
 app.listen(port, () => {
     console.log(`✅ Web Server on port ${port}`);
+    console.log('⏳ جاري تسجيل دخول البوت...');
+    console.log('🔑 التوكن موجود:', !!BOT_TOKEN);
     client.login(BOT_TOKEN).catch(err => {
         console.error('❌ فشل تسجيل الدخول:', err.message);
         process.exit(1);
-    });
-});
