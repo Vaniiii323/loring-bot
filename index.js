@@ -17,10 +17,6 @@ const BOT_TOKEN       = process.env.BOT_TOKEN;
 const MANAGER_ROLE_ID = process.env.MANAGER_ROLE_ID;
 const PREFIX          = '-';
 
-console.log('🔍 TOKEN exists:', !!BOT_TOKEN);
-console.log('🔍 MANAGER_ROLE_ID exists:', !!MANAGER_ROLE_ID);
-console.log('🔍 TOKEN value (first 20):', BOT_TOKEN?.substring(0, 20));
-
 const LOGS_CHANNEL_ID     = '1449444036824797334';
 const ARCHIVE_CATEGORY_ID = '1449459496144470056';
 const REQUESTS_CHANNEL_ID = '1477338804502266079';
@@ -58,6 +54,13 @@ function hasPermission(member, level = 1) {
 function getSetting(k, def) { return db.settings[k] !== undefined ? db.settings[k] : def; }
 function setSetting(k, v)   { db.settings[k] = v; saveData(db); }
 
+// ─── Express أولاً عشان Render ما يكيل ─────
+const app  = express();
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(port, () => console.log(`✅ Web Server on port ${port}`));
+
+// ─── إنشاء الكلاينت ───
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -344,11 +347,14 @@ client.on('ready', () => {
     });
     scheduleDailyStats();
     scheduleWeeklyReport();
-    setInterval(updateLiveStats,    3600000);
+    setInterval(updateLiveStats,       3600000);
     setInterval(checkAbandonedTickets, 3600000);
     setInterval(checkMemberReminders,  1800000);
     setTimeout(updateLiveStats, 5000);
 });
+
+client.on('error', err => console.error('Discord client error:', err));
+client.on('warn',  msg => console.warn('Discord warning:', msg));
 
 // ===============================================
 // 5. الأوامر
@@ -396,68 +402,31 @@ client.on('messageCreate', async message => {
 
     if (cmd === 'إحصائيات') {
         if (!isAdm) return message.reply({ content: '❌ للمسؤولين فقط.' });
-
         let tid = null;
         const mentioned = message.mentions.users.first();
-        if (mentioned) {
-            tid = mentioned.id;
-        } else if (args[0] && /^\d{17,20}$/.test(args[0])) {
-            tid = args[0];
-        }
-
-        if (!tid) return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('📖 استخدام الأمر')
-            .setDescription('❌ الاستخدام:\n`-إحصائيات @الاداري`\n`-إحصائيات 123456789012345678`')
-        ]});
-
-        let u;
-        try { u = await client.users.fetch(tid); }
-        catch { return message.reply({ content: '❌ المستخدم غير موجود.' }); }
-
-        const d = db.ratings[tid];
-        const p = db.points[tid];
+        if (mentioned) { tid = mentioned.id; }
+        else if (args[0] && /^\d{17,20}$/.test(args[0])) { tid = args[0]; }
+        if (!tid) return message.reply({ content: '❌ الاستخدام: `-إحصائيات @الاداري`' });
+        let u; try { u = await client.users.fetch(tid); } catch { return message.reply({ content: '❌ المستخدم غير موجود.' }); }
+        const d = db.ratings[tid], p = db.points[tid];
         const pointCount = p ? p.count : 0;
-        const rank = Object.entries(db.points).sort((a, b) => b[1].count - a[1].count).findIndex(([id]) => id === tid) + 1;
-
-        if ((!d || !d.count) && !p) {
-            return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245')
-                .setAuthor({ name: u.tag, iconURL: u.displayAvatarURL({ dynamic: true }) })
-                .setDescription(`❌ لا توجد بيانات لـ **${u.tag}** حتى الآن.`)
-                .setTimestamp()
-            ]});
-        }
-
-        const avg = (d && d.count) ? (d.total / d.count).toFixed(1) : '0.0';
-        const avgStars = (d && d.count) ? '⭐'.repeat(Math.round(d.total / d.count)) : '—';
-        const ratingCount = d ? d.count : 0;
-
-        const hist = (d && d.history && d.history.length > 0)
-            ? d.history.slice(-5).reverse().map((r, i) =>
-                `**${i + 1}.** ${'⭐'.repeat(r.stars)} — \`${r.ticketName}\` | ${r.memberTag} | <t:${Math.floor(r.time / 1000)}:R>`
-            ).join('\n')
-            : '> لا توجد تقييمات مسجلة بعد';
-
-        const absStatus = isAbsent(tid) ? '🔴 غائب' : '🟢 متاح';
-        const botRole = getBotRole(tid);
-        const roleLabel = botRole === 3 ? '👑 مالك' : botRole === 2 ? '🔱 مشرف' : botRole === 1 ? '🛡️ إداري' : '👤 عضو';
-
+        const rank = Object.entries(db.points).sort((a,b)=>b[1].count-a[1].count).findIndex(([id])=>id===tid)+1;
+        if ((!d||!d.count)&&!p) return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setDescription(`❌ لا توجد بيانات لـ **${u.tag}**`)] });
+        const avg = (d&&d.count)?(d.total/d.count).toFixed(1):'0.0';
+        const avgStars = (d&&d.count)?'⭐'.repeat(Math.round(d.total/d.count)):'—';
+        const hist = (d&&d.history&&d.history.length>0)?d.history.slice(-5).reverse().map((r,i)=>`**${i+1}.** ${'⭐'.repeat(r.stars)} — \`${r.ticketName}\` | ${r.memberTag} | <t:${Math.floor(r.time/1000)}:R>`).join('\n'):'> لا توجد تقييمات';
         await message.reply({ embeds: [new EmbedBuilder().setColor('#5865F2')
-            .setAuthor({ name: `إحصائيات ${u.tag}`, iconURL: u.displayAvatarURL({ dynamic: true }) })
-            .setThumbnail(u.displayAvatarURL({ dynamic: true, size: 256 }))
-            .setTitle('📊 الإحصائيات الكاملة')
+            .setAuthor({ name: `إحصائيات ${u.tag}`, iconURL: u.displayAvatarURL({dynamic:true}) })
+            .setThumbnail(u.displayAvatarURL({dynamic:true,size:256})).setTitle('📊 الإحصائيات الكاملة')
             .addFields(
-                { name: '👤 الإداري', value: `<@${tid}>`, inline: true },
-                { name: '🏷️ الرتبة', value: roleLabel, inline: true },
-                { name: '📡 الحالة', value: absStatus, inline: true },
-                { name: '🎫 التكتات المُنجزة', value: `\`${pointCount}\``, inline: true },
-                { name: '🏆 الترتيب', value: rank > 0 ? `\`#${rank}\`` : '`—`', inline: true },
-                { name: '⭐ متوسط التقييم', value: `\`${avg}/5\` ${avgStars}`, inline: true },
-                { name: '📝 عدد التقييمات', value: `\`${ratingCount}\``, inline: true },
-                { name: '\u200b', value: '\u200b', inline: true },
-                { name: '\u200b', value: '\u200b', inline: true },
-                { name: '🕐 آخر 5 تقييمات', value: hist, inline: false }
-            )
-            .setFooter({ text: `طلب بواسطة ${message.author.tag}` })
-            .setTimestamp()
+                { name: '👤 الإداري', value: `<@${tid}>`, inline:true },
+                { name: '🏷️ الرتبة', value: getBotRole(tid)===3?'👑 مالك':getBotRole(tid)===2?'🔱 مشرف':getBotRole(tid)===1?'🛡️ إداري':'👤 عضو', inline:true },
+                { name: '📡 الحالة', value: isAbsent(tid)?'🔴 غائب':'🟢 متاح', inline:true },
+                { name: '🎫 التكتات', value: `\`${pointCount}\``, inline:true },
+                { name: '🏆 الترتيب', value: rank>0?`\`#${rank}\``:'`—`', inline:true },
+                { name: '⭐ المتوسط', value: `\`${avg}/5\` ${avgStars}`, inline:true },
+                { name: '🕐 آخر 5 تقييمات', value: hist, inline:false }
+            ).setTimestamp()
         ]});
     }
 
@@ -468,10 +437,7 @@ client.on('messageCreate', async message => {
         const rank = Object.entries(db.points).sort((a,b)=>b[1].count-a[1].count).findIndex(([id])=>id===message.author.id)+1;
         await message.reply({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('🏅 نقاطك')
             .setThumbnail(message.author.displayAvatarURL({dynamic:true}))
-            .addFields(
-                { name: '🎫 إجمالي التكتات', value: `\`${p.count}\``, inline: true },
-                { name: '🏆 ترتيبك',          value: `\`#${rank}\``, inline: true }
-            ).setTimestamp()
+            .addFields({ name: '🎫 إجمالي التكتات', value: `\`${p.count}\``, inline: true }, { name: '🏆 ترتيبك', value: `\`#${rank}\``, inline: true }).setTimestamp()
         ]});
     }
 
@@ -479,10 +445,7 @@ client.on('messageCreate', async message => {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const sorted = Object.entries(db.points).sort((a,b)=>b[1].count-a[1].count);
         if (!sorted.length) return message.reply({ content: '❌ لا توجد نقاط بعد.' });
-        const list = sorted.map((e,i)=>{
-            const m = i===0?'🥇':i===1?'🥈':i===2?'🥉':`**${i+1}.**`;
-            return `${m} <@${e[0]}> — \`${e[1].count}\` تكت`;
-        }).join('\n');
+        const list = sorted.map((e,i)=>{ const m=i===0?'🥇':i===1?'🥈':i===2?'🥉':`**${i+1}.**`; return `${m} <@${e[0]}> — \`${e[1].count}\` تكت`; }).join('\n');
         await message.reply({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('🏆 لوحة النقاط').setDescription(list).setTimestamp()] });
     }
 
@@ -491,11 +454,7 @@ client.on('messageCreate', async message => {
         if (!t) return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setDescription('❌ ليس لديك تكت مفتوح.')] });
         const ot = ticketOpenTime.get(t.id), cl = ticketClaimer.get(t.id);
         await message.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('🎫 تكتك الحالي')
-            .addFields(
-                { name: '📋 القناة', value: `${t}`, inline: true },
-                { name: '⏱️ المدة',  value: ot?formatDuration(Date.now()-ot):'غير معروف', inline: true },
-                { name: '🛡️ الإداري', value: cl?`<@${cl.adminId}>`:'لم يُتولى بعد', inline: true }
-            ).setTimestamp()
+            .addFields({ name: '📋 القناة', value: `${t}`, inline: true }, { name: '⏱️ المدة', value: ot?formatDuration(Date.now()-ot):'غير معروف', inline: true }, { name: '🛡️ الإداري', value: cl?`<@${cl.adminId}>`:'لم يُتولى بعد', inline: true }).setTimestamp()
         ]});
     }
 
@@ -515,10 +474,8 @@ client.on('messageCreate', async message => {
         ticketClaimer.delete(ch.id);
         await ch.permissionOverwrites.edit(message.guild.roles.cache.get(MANAGER_ROLE_ID), { ViewChannel:true, SendMessages:true }).catch(()=>{});
         await ch.permissionOverwrites.delete(message.author.id).catch(()=>{});
-        await ch.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setDescription(`⚠️ **${message.author} ترك هذا التكت.** سيُعاد للإداريين.`)] });
-        await sendLog(message.guild, new EmbedBuilder().setColor('#FEE75C').setTitle('↩️ إداري ترك تكتاً')
-            .addFields({ name: '🛡️ الإداري', value: `${message.author}`, inline:true }, { name: '📋 التكت', value: `${ch}`, inline:true }, { name: '👤 صاحب التكت', value: `<@${oid}>`, inline:true }).setTimestamp()
-        );
+        await ch.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setDescription(`⚠️ **${message.author} ترك هذا التكت.**`)] });
+        await sendLog(message.guild, new EmbedBuilder().setColor('#FEE75C').setTitle('↩️ إداري ترك تكتاً').addFields({ name: '🛡️ الإداري', value: `${message.author}`, inline:true }, { name: '📋 التكت', value: `${ch}`, inline:true }, { name: '👤 صاحب التكت', value: `<@${oid}>`, inline:true }).setTimestamp());
         const rc = message.guild.channels.cache.get(REQUESTS_CHANNEL_ID);
         if (rc) await rc.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('🔁 تكت يحتاج إداري جديد').setDescription(`التكت ${ch} تُرك ويحتاج من يتولاه.`).addFields({ name: '👤 صاحب التكت', value: `<@${oid}>`, inline:true }).setTimestamp()],
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`accept_ticket_${ch.id}_${oid}`).setLabel('تولي التكت').setStyle(ButtonStyle.Success).setEmoji('✋'))] });
@@ -532,9 +489,7 @@ client.on('messageCreate', async message => {
         if (!target) return message.reply({ content: '❌ الاستخدام: `-إضافة @شخص`' });
         await message.channel.permissionOverwrites.edit(target.id, { ViewChannel:true, SendMessages:true });
         await message.channel.send({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription(`✅ تمت إضافة ${target} بواسطة ${message.author}.`)] });
-        await sendLog(message.guild, new EmbedBuilder().setColor('#57F287').setTitle('➕ إضافة عضو')
-            .addFields({ name: '🛡️ الإداري', value: `${message.author}`, inline:true }, { name: '👤 المضاف', value: `${target}`, inline:true }, { name: '📋 التكت', value: `${message.channel}`, inline:true }).setTimestamp()
-        );
+        await sendLog(message.guild, new EmbedBuilder().setColor('#57F287').setTitle('➕ إضافة عضو').addFields({ name: '🛡️ الإداري', value: `${message.author}`, inline:true }, { name: '👤 المضاف', value: `${target}`, inline:true }, { name: '📋 التكت', value: `${message.channel}`, inline:true }).setTimestamp());
         await message.delete().catch(()=>{});
     }
 
@@ -543,15 +498,13 @@ client.on('messageCreate', async message => {
         const ch = message.channel; if (!ch.topic) return message.reply({ content: '❌ هذه القناة ليست تكت.' });
         const target = message.mentions.members.first();
         if (!target) return message.reply({ content: '❌ الاستخدام: `-نقل @إداري`' });
-        if (!target.roles.cache.has(MANAGER_ROLE_ID) && !isBotAdmin(target.id)) return message.reply({ content: '❌ الشخص المذكور ليس إدارياً.' });
+        if (!target.roles.cache.has(MANAGER_ROLE_ID)&&!isBotAdmin(target.id)) return message.reply({ content: '❌ الشخص المذكور ليس إدارياً.' });
         const old = ticketClaimer.get(ch.id);
         ticketClaimer.set(ch.id, { adminId: target.id, adminTag: target.user.tag });
         if (old) await ch.permissionOverwrites.delete(old.adminId).catch(()=>{});
         await ch.permissionOverwrites.edit(target.id, { ViewChannel:true, SendMessages:true });
         await ch.send({ embeds: [new EmbedBuilder().setColor('#5865F2').setDescription(`🔄 **نُقل التكت من ${message.author} إلى ${target}.**`)] });
-        await sendLog(message.guild, new EmbedBuilder().setColor('#5865F2').setTitle('🔄 نقل تكت')
-            .addFields({ name: '↩️ من', value: `${message.author}`, inline:true }, { name: '➡️ إلى', value: `${target}`, inline:true }, { name: '📋 التكت', value: `${ch}`, inline:true }).setTimestamp()
-        );
+        await sendLog(message.guild, new EmbedBuilder().setColor('#5865F2').setTitle('🔄 نقل تكت').addFields({ name: '↩️ من', value: `${message.author}`, inline:true }, { name: '➡️ إلى', value: `${target}`, inline:true }, { name: '📋 التكت', value: `${ch}`, inline:true }).setTimestamp());
         await message.delete().catch(()=>{});
     }
 
@@ -560,7 +513,7 @@ client.on('messageCreate', async message => {
         if (!message.channel.topic) return message.reply({ content: '❌ هذه القناة ليست تكت.' });
         const text = args.join(' '); if (!text) return message.reply({ content: '❌ الاستخدام: `-تعليق النص`' });
         await message.delete().catch(()=>{});
-        await message.channel.send({ embeds: [new EmbedBuilder().setColor('#747F8D').setTitle('📝 ملاحظة داخلية').setDescription(text).setFooter({ text: `بواسطة ${message.author.tag} — مرئي للإداريين فقط` }).setTimestamp()] });
+        await message.channel.send({ embeds: [new EmbedBuilder().setColor('#747F8D').setTitle('📝 ملاحظة داخلية').setDescription(text).setFooter({ text: `بواسطة ${message.author.tag}` }).setTimestamp()] });
     }
 
     if (cmd === 'قفل') {
@@ -593,6 +546,7 @@ client.on('messageCreate', async message => {
         if (!db.absents.includes(message.author.id)) { db.absents.push(message.author.id); saveData(db); }
         await message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setDescription(`🔴 **${message.author.username}** في وضع **غائب**.`)] });
     }
+
     if (cmd === 'متاح') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         if (db.absents) { db.absents = db.absents.filter(id=>id!==message.author.id); saveData(db); }
@@ -604,22 +558,14 @@ client.on('messageCreate', async message => {
         const sub = args[0]?.toLowerCase(), text = args.slice(1).join(' ');
         const SM  = { online:'online', idle:'idle', dnd:'dnd', invisible:'invisible', offline:'invisible' };
         const AM  = { playing:ActivityType.Playing, watching:ActivityType.Watching, listening:ActivityType.Listening, competing:ActivityType.Competing };
-        if (SM[sub]) {
-            setSetting('status', SM[sub]); await client.user.setStatus(SM[sub]);
-            return message.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setDescription(`✅ الحالة → \`${sub}\``)] });
-        }
+        if (SM[sub]) { setSetting('status', SM[sub]); await client.user.setStatus(SM[sub]); return message.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setDescription(`✅ الحالة → \`${sub}\``)] }); }
         if (AM[sub]) {
             if (!text) return message.reply({ content: '❌ أدخل نص النشاط.' });
             setSetting('activityType', sub); setSetting('activityText', text);
             await client.user.setActivity(text, { type: AM[sub] });
             return message.reply({ embeds: [new EmbedBuilder().setColor('#5865F2').setDescription(`✅ النشاط → **${sub}** | \`${text}\``)] });
         }
-        return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('📖 -حالة')
-            .addFields(
-                { name: '🟢 الحالات', value: '`online` `idle` `dnd` `invisible`', inline: true },
-                { name: '🎮 الأنشطة', value: '`playing` `watching` `listening` `competing` + نص', inline: true }
-            )
-        ]});
+        return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('📖 -حالة').addFields({ name: '🟢 الحالات', value: '`online` `idle` `dnd` `invisible`', inline:true }, { name: '🎮 الأنشطة', value: '`playing` `watching` `listening` `competing` + نص', inline:true })] });
     }
 
     if (cmd === 'مساعدة') {
@@ -639,8 +585,7 @@ client.on('interactionCreate', async interaction => {
   try {
 
     if (interaction.isButton() && interaction.customId === 'open_ticket_menu') {
-        if (getSetting('locked', false))
-            return interaction.reply({ content: '🔒 نظام التكتات مغلق مؤقتاً.', flags: MessageFlags.Ephemeral });
+        if (getSetting('locked', false)) return interaction.reply({ content: '🔒 نظام التكتات مغلق مؤقتاً.', flags: MessageFlags.Ephemeral });
         if (!firstTicketSet.has(interaction.user.id)) {
             firstTicketSet.add(interaction.user.id);
             await interaction.user.send({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('👋 مرحباً في نظام التكتات!')
@@ -653,12 +598,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isStringSelectMenu() && interaction.customId === 'service_select_menu') {
         return interaction.update({
             content: `✅ اخترت: **${SERVICE_OPTIONS[interaction.values[0]].label}**\n\n👇 حدد مستوى الأهمية:`,
-            components: [
-                ...createPriorityComponents(),
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`back_service_${interaction.values[0]}`).setLabel('تغيير الخدمة').setStyle(ButtonStyle.Secondary).setEmoji('↩️')
-                )
-            ]
+            components: [...createPriorityComponents(), new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`back_service_${interaction.values[0]}`).setLabel('تغيير الخدمة').setStyle(ButtonStyle.Secondary).setEmoji('↩️'))]
         });
     }
 
@@ -682,21 +622,17 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
         const parts = interaction.customId.replace('ticket_modal_','').split('_');
         const pKey  = parts.pop(), sKey = parts.join('_');
-        return sendTicketRequest(interaction, sKey, pKey,
-            interaction.fields.getTextInputValue('ticket_title'),
-            interaction.fields.getTextInputValue('ticket_description')
-        );
+        return sendTicketRequest(interaction, sKey, pKey, interaction.fields.getTextInputValue('ticket_title'), interaction.fields.getTextInputValue('ticket_description'));
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('accept_ticket_')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID) && !isBotAdmin(interaction.user.id) && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator))
+        if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID)&&!isBotAdmin(interaction.user.id)&&!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator))
             return interaction.editReply({ content: '❌ للإداريين فقط.' });
-        if (isAbsent(interaction.user.id))
-            return interaction.editReply({ content: '❌ أنت في وضع غائب! اكتب `-متاح` أولاً.' });
-        const parts  = interaction.customId.split('_');
-        const msgId  = parts[2], userId = parts[3];
-        const data   = pendingTickets.get(msgId);
+        if (isAbsent(interaction.user.id)) return interaction.editReply({ content: '❌ أنت في وضع غائب! اكتب `-متاح` أولاً.' });
+        const parts = interaction.customId.split('_');
+        const msgId = parts[2], userId = parts[3];
+        const data  = pendingTickets.get(msgId);
         if (!data) {
             const ch = interaction.guild.channels.cache.get(msgId);
             if (!ch) return interaction.editReply({ content: '❌ القناة غير موجودة.' });
@@ -719,6 +655,7 @@ client.on('interactionCreate', async interaction => {
             .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reject_reason').setLabel('سبب الرفض').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(300)))
         );
     }
+
     if (interaction.isModalSubmit() && interaction.customId.startsWith('reject_modal_')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const msgId  = interaction.customId.replace('reject_modal_','');
@@ -728,13 +665,8 @@ client.on('interactionCreate', async interaction => {
         pendingTickets.delete(msgId);
         await interaction.message.edit({ embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('❌ مرفوض').setDescription(`رفض ${interaction.user}.\n**السبب:** ${reason}`).setTimestamp()], components: [] }).catch(()=>{});
         const member = await interaction.guild.members.fetch(data.userId).catch(()=>null);
-        if (member) await member.send({ embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('❌ تم رفض طلبك')
-            .setDescription(`مرحباً **${member.user.username}**،\nتم رفض طلبك.`)
-            .addFields({ name: '📌 العنوان', value: data.title }, { name: '💬 السبب', value: reason }).setTimestamp()
-        ]}).catch(()=>{});
-        await sendLog(interaction.guild, new EmbedBuilder().setColor('#ED4245').setTitle('❌ طلب مرفوض')
-            .addFields({ name: '👤 العضو', value: `<@${data.userId}>`, inline:true }, { name: '🛡️ بواسطة', value: `${interaction.user}`, inline:true }, { name: '💬 السبب', value: reason }).setTimestamp()
-        );
+        if (member) await member.send({ embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('❌ تم رفض طلبك').setDescription(`مرحباً **${member.user.username}**،\nتم رفض طلبك.`).addFields({ name: '📌 العنوان', value: data.title }, { name: '💬 السبب', value: reason }).setTimestamp()] }).catch(()=>{});
+        await sendLog(interaction.guild, new EmbedBuilder().setColor('#ED4245').setTitle('❌ طلب مرفوض').addFields({ name: '👤 العضو', value: `<@${data.userId}>`, inline:true }, { name: '🛡️ بواسطة', value: `${interaction.user}`, inline:true }, { name: '💬 السبب', value: reason }).setTimestamp());
         await interaction.editReply({ content: '✅ تم الرفض وإبلاغ العضو.' });
     }
 
@@ -746,37 +678,27 @@ client.on('interactionCreate', async interaction => {
             .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note_text').setLabel('ملاحظتك').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500)))
         );
     }
+
     if (interaction.isModalSubmit() && interaction.customId.startsWith('note_modal_')) {
         const cid  = interaction.customId.replace('note_modal_','');
         const note = interaction.fields.getTextInputValue('note_text');
         await interaction.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription('✅ تم إرسال ملاحظتك! شكراً 😊')], flags: MessageFlags.Ephemeral });
-        await sendLog(client.guilds.cache.first(), new EmbedBuilder().setColor('#5865F2').setTitle('📝 ملاحظة عضو')
-            .addFields({ name: '👤 العضو', value: `${interaction.user}`, inline:true }, { name: '📋 التكت', value: `\`${cid}\``, inline:true }, { name: '💬 الملاحظة', value: note }).setTimestamp()
-        );
+        await sendLog(client.guilds.cache.first(), new EmbedBuilder().setColor('#5865F2').setTitle('📝 ملاحظة عضو').addFields({ name: '👤 العضو', value: `${interaction.user}`, inline:true }, { name: '📋 التكت', value: `\`${cid}\``, inline:true }, { name: '💬 الملاحظة', value: note }).setTimestamp());
     }
 
     if (interaction.isButton() && interaction.customId.startsWith('ctrl_')) {
-        if (!hasPermission(interaction.member, 2))
-            return interaction.reply({ content: '❌ لا تملك صلاحية استخدام لوحة التحكم.', flags: MessageFlags.Ephemeral });
+        if (!hasPermission(interaction.member, 2)) return interaction.reply({ content: '❌ لا تملك صلاحية استخدام لوحة التحكم.', flags: MessageFlags.Ephemeral });
         const id = interaction.customId;
 
-        if (id === 'ctrl_rename')
-            return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_rename').setTitle('تغيير اسم البوت')
-                .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('new_name').setLabel('الاسم الجديد').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32)))
-            );
+        if (id === 'ctrl_rename') return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_rename').setTitle('تغيير اسم البوت').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('new_name').setLabel('الاسم الجديد').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32))));
+        if (id === 'ctrl_avatar') return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_avatar').setTitle('تغيير أفاتار البوت').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('avatar_url').setLabel('رابط الصورة (PNG/JPG/WebP)').setStyle(TextInputStyle.Short).setRequired(true))));
 
-        if (id === 'ctrl_avatar')
-            return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_avatar').setTitle('تغيير أفاتار البوت')
-                .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('avatar_url').setLabel('رابط الصورة (PNG/JPG/WebP)').setStyle(TextInputStyle.Short).setRequired(true)))
-            );
-
-        if (id === 'ctrl_status')
-            return interaction.reply({ content: '🔵 اختر الحالة:', flags: MessageFlags.Ephemeral, components: [new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('ctrl_set_status_online').setLabel('أونلاين').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('ctrl_set_status_idle').setLabel('غير نشط').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('ctrl_set_status_dnd').setLabel('لا تزعج').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId('ctrl_set_status_invisible').setLabel('مخفي').setStyle(ButtonStyle.Secondary)
-            )]});
+        if (id === 'ctrl_status') return interaction.reply({ content: '🔵 اختر الحالة:', flags: MessageFlags.Ephemeral, components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('ctrl_set_status_online').setLabel('أونلاين').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('ctrl_set_status_idle').setLabel('غير نشط').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('ctrl_set_status_dnd').setLabel('لا تزعج').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('ctrl_set_status_invisible').setLabel('مخفي').setStyle(ButtonStyle.Secondary)
+        )]});
 
         if (id.startsWith('ctrl_set_status_')) {
             const st = id.replace('ctrl_set_status_','');
@@ -787,13 +709,10 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        if (id === 'ctrl_activity')
-            return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_activity').setTitle('تغيير نشاط البوت')
-                .addComponents(
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('activity_type').setLabel('النوع: playing/watching/listening').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20)),
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('activity_text').setLabel('النص').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(128))
-                )
-            );
+        if (id === 'ctrl_activity') return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_activity').setTitle('تغيير نشاط البوت').addComponents(
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('activity_type').setLabel('النوع: playing/watching/listening').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('activity_text').setLabel('النص').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(128))
+        ));
 
         if (id === 'ctrl_lock') {
             const locked = getSetting('locked', false); setSetting('locked', !locked);
@@ -803,50 +722,20 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        if (id === 'ctrl_reminder')
-            return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_reminder').setTitle('وقت التذكير')
-                .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('hours').setLabel('عدد الساعات (1-72)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3)))
-            );
-
-        if (id === 'ctrl_refresh') {
-            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            await refreshControlPanel(interaction.guild);
-            return interaction.editReply({ content: '✅ تم تحديث اللوحة.' });
-        }
-
-        if (id === 'ctrl_add_admin')
-            return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_add_admin').setTitle('إضافة إداري للبوت')
-                .addComponents(
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_id').setLabel('ID العضو').setStyle(TextInputStyle.Short).setRequired(true)),
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_role').setLabel('المستوى: 1=إداري / 2=مشرف / 3=مالك').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1))
-                )
-            );
-
-        if (id === 'ctrl_remove_admin')
-            return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_remove_admin').setTitle('إزالة إداري')
-                .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_id').setLabel('ID العضو').setStyle(TextInputStyle.Short).setRequired(true)))
-            );
-
-        if (id === 'ctrl_clear_points')
-            return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_clear_points').setTitle('مسح نقاط')
-                .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_id').setLabel('ID الإداري أو "all" للكل').setStyle(TextInputStyle.Short).setRequired(true)))
-            );
+        if (id === 'ctrl_reminder') return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_reminder').setTitle('وقت التذكير').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('hours').setLabel('عدد الساعات (1-72)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(3))));
+        if (id === 'ctrl_refresh') { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); await refreshControlPanel(interaction.guild); return interaction.editReply({ content: '✅ تم تحديث اللوحة.' }); }
+        if (id === 'ctrl_add_admin') return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_add_admin').setTitle('إضافة إداري للبوت').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_id').setLabel('ID العضو').setStyle(TextInputStyle.Short).setRequired(true)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_role').setLabel('المستوى: 1=إداري / 2=مشرف / 3=مالك').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1))));
+        if (id === 'ctrl_remove_admin') return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_remove_admin').setTitle('إزالة إداري').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_id').setLabel('ID العضو').setStyle(TextInputStyle.Short).setRequired(true))));
+        if (id === 'ctrl_clear_points') return interaction.showModal(new ModalBuilder().setCustomId('ctrl_modal_clear_points').setTitle('مسح نقاط').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('admin_id').setLabel('ID الإداري أو "all" للكل').setStyle(TextInputStyle.Short).setRequired(true))));
 
         if (id === 'ctrl_view_stats') {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            const g    = interaction.guild;
+            const g = interaction.guild;
             const open = g.channels.cache.filter(c=>c.topic&&!c.name.startsWith('closed-')).size;
             const arc  = g.channels.cache.filter(c=>c.name.startsWith('closed-')).size;
-            const tot  = Object.values(db.points).reduce((s,d)=>s+d.count, 0);
-            const rats = Object.values(db.ratings).reduce((s,d)=>s+d.count, 0);
-            return interaction.editReply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('📊 إحصائيات كاملة')
-                .addFields(
-                    { name: '📂 مفتوحة', value: `\`${open}\``, inline:true },
-                    { name: '📁 مؤرشفة', value: `\`${arc}\``, inline:true },
-                    { name: '🎫 إجمالي التكتات', value: `\`${tot}\``, inline:true },
-                    { name: '⭐ إجمالي التقييمات', value: `\`${rats}\``, inline:true }
-                ).setTimestamp()
-            ]});
+            const tot  = Object.values(db.points).reduce((s,d)=>s+d.count,0);
+            const rats = Object.values(db.ratings).reduce((s,d)=>s+d.count,0);
+            return interaction.editReply({ embeds: [new EmbedBuilder().setColor('#5865F2').setTitle('📊 إحصائيات كاملة').addFields({ name: '📂 مفتوحة', value: `\`${open}\``, inline:true }, { name: '📁 مؤرشفة', value: `\`${arc}\``, inline:true }, { name: '🎫 إجمالي التكتات', value: `\`${tot}\``, inline:true }, { name: '⭐ إجمالي التقييمات', value: `\`${rats}\``, inline:true }).setTimestamp()] });
         }
     }
 
@@ -861,14 +750,12 @@ client.on('interactionCreate', async interaction => {
             await auditLog(interaction.guild, 'تغيير الاسم', interaction.user.id, `الاسم: ${name}`);
             await refreshControlPanel(interaction.guild);
         }
-
         if (mid === 'avatar') {
             const url = interaction.fields.getTextInputValue('avatar_url');
             await client.user.setAvatar(url).catch(()=>{ return interaction.editReply({ content: '❌ فشل. تأكد من صحة الرابط.' }); });
             await interaction.editReply({ content: '✅ تم تغيير الأفاتار.' });
             await auditLog(interaction.guild, 'تغيير الأفاتار', interaction.user.id, url);
         }
-
         if (mid === 'activity') {
             const type = interaction.fields.getTextInputValue('activity_type').toLowerCase();
             const text = interaction.fields.getTextInputValue('activity_text');
@@ -880,7 +767,6 @@ client.on('interactionCreate', async interaction => {
             await refreshControlPanel(interaction.guild);
             await auditLog(interaction.guild, 'تغيير النشاط', interaction.user.id, `${type}: ${text}`);
         }
-
         if (mid === 'reminder') {
             const h = parseInt(interaction.fields.getTextInputValue('hours'));
             if (!h||h<1||h>72) return interaction.editReply({ content: '❌ أدخل رقماً من 1 إلى 72.' });
@@ -888,7 +774,6 @@ client.on('interactionCreate', async interaction => {
             await interaction.editReply({ content: `✅ وقت التذكير → **${h} ساعة**` });
             await refreshControlPanel(interaction.guild);
         }
-
         if (mid === 'add_admin') {
             const rawId = interaction.fields.getTextInputValue('admin_id').replace(/[<@!>]/g,'');
             const level = parseInt(interaction.fields.getTextInputValue('admin_role'));
@@ -896,35 +781,24 @@ client.on('interactionCreate', async interaction => {
             let u; try { u = await client.users.fetch(rawId); } catch { return interaction.editReply({ content: '❌ المستخدم غير موجود.' }); }
             db.botUsers[u.id] = { tag: u.tag, role: level }; saveData(db);
             const lbl = level===3?'👑 مالك':level===2?'🔱 مشرف':'🛡️ إداري';
-            if (db.controlChannelId) {
-                const cc = interaction.guild.channels.cache.get(db.controlChannelId);
-                if (cc) await cc.permissionOverwrites.edit(u.id, { ViewChannel:true, SendMessages:false }).catch(()=>{});
-            }
+            if (db.controlChannelId) { const cc = interaction.guild.channels.cache.get(db.controlChannelId); if (cc) await cc.permissionOverwrites.edit(u.id, { ViewChannel:true, SendMessages:false }).catch(()=>{}); }
             await interaction.editReply({ content: `✅ تم تسجيل **${u.tag}** كـ ${lbl}` });
             await auditLog(interaction.guild, 'إضافة إداري', interaction.user.id, `${u.tag} — ${lbl}`);
             await refreshControlPanel(interaction.guild);
         }
-
         if (mid === 'remove_admin') {
             const rawId = interaction.fields.getTextInputValue('admin_id').replace(/[<@!>]/g,'');
             if (!db.botUsers[rawId]) return interaction.editReply({ content: '❌ هذا الشخص غير مسجل.' });
             const tag = db.botUsers[rawId].tag; delete db.botUsers[rawId]; saveData(db);
-            if (db.controlChannelId) {
-                const cc = interaction.guild.channels.cache.get(db.controlChannelId);
-                if (cc) await cc.permissionOverwrites.delete(rawId).catch(()=>{});
-            }
+            if (db.controlChannelId) { const cc = interaction.guild.channels.cache.get(db.controlChannelId); if (cc) await cc.permissionOverwrites.delete(rawId).catch(()=>{}); }
             await interaction.editReply({ content: `✅ تم إزالة **${tag}** من البوت.` });
             await auditLog(interaction.guild, 'إزالة إداري', interaction.user.id, `المُزال: ${tag}`);
             await refreshControlPanel(interaction.guild);
         }
-
         if (mid === 'clear_points') {
             const raw = interaction.fields.getTextInputValue('admin_id').replace(/[<@!>]/g,'');
-            if (raw === 'all') {
-                db.points = {}; saveData(db);
-                await interaction.editReply({ content: '✅ تم مسح نقاط الجميع.' });
-                await auditLog(interaction.guild, 'مسح كل النقاط', interaction.user.id, 'الكل');
-            } else {
+            if (raw === 'all') { db.points = {}; saveData(db); await interaction.editReply({ content: '✅ تم مسح نقاط الجميع.' }); await auditLog(interaction.guild, 'مسح كل النقاط', interaction.user.id, 'الكل'); }
+            else {
                 if (!db.points[raw]) return interaction.editReply({ content: '❌ لا توجد نقاط لهذا الإداري.' });
                 const tag = db.points[raw].tag; delete db.points[raw]; saveData(db);
                 await interaction.editReply({ content: `✅ تم مسح نقاط **${tag}**` });
@@ -949,29 +823,20 @@ async function sendTicketRequest(interaction, serviceKey, priorityKey, title, de
     const guild  = interaction.guild, member = interaction.member;
     const sInfo  = SERVICE_OPTIONS[serviceKey]  || SERVICE_OPTIONS.general_ticket;
     const pInfo  = PRIORITY_OPTIONS[priorityKey] || PRIORITY_OPTIONS.normal;
-
     const existing   = guild.channels.cache.find(c=>c.topic===member.user.id&&!c.name.startsWith('closed-'));
     if (existing)    return interaction.editReply({ content: `❌ لديك تكت مفتوح: ${existing}` });
     const hasPending = [...pendingTickets.values()].some(v=>v.userId===member.user.id);
     if (hasPending)  return interaction.editReply({ content: '❌ لديك طلب معلق. اكتب `-إلغاء` لإلغائه.' });
-
     const reqCh = guild.channels.cache.get(REQUESTS_CHANNEL_ID);
     if (!reqCh)  return interaction.editReply({ content: '❌ روم الطلبات غير موجود.' });
-
     try {
         const reqMsg = await reqCh.send({
             content: `<@&${MANAGER_ROLE_ID}>`,
             embeds: [new EmbedBuilder().setColor(pInfo.color)
                 .setAuthor({ name: `طلب جديد — ${member.user.tag}`, iconURL: member.user.displayAvatarURL({dynamic:true}) })
-                .setTitle(`${sInfo.emoji} ${sInfo.label}`)
-                .setThumbnail(member.user.displayAvatarURL({dynamic:true,size:256}))
-                .addFields(
-                    { name: '👤 العضو', value: `${member}`, inline:true },
-                    { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true },
-                    { name: '🕐 وقت الطلب', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline:true },
-                    { name: '📌 العنوان', value: title, inline:false },
-                    { name: '📝 التفاصيل', value: description, inline:false }
-                ).setFooter({ text: 'استخدم الأزرار للقبول أو الرفض' }).setTimestamp()
+                .setTitle(`${sInfo.emoji} ${sInfo.label}`).setThumbnail(member.user.displayAvatarURL({dynamic:true,size:256}))
+                .addFields({ name: '👤 العضو', value: `${member}`, inline:true }, { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true }, { name: '🕐 وقت الطلب', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline:true }, { name: '📌 العنوان', value: title, inline:false }, { name: '📝 التفاصيل', value: description, inline:false })
+                .setFooter({ text: 'استخدم الأزرار للقبول أو الرفض' }).setTimestamp()
             ]
         });
         await reqMsg.edit({ components: [new ActionRowBuilder().addComponents(
@@ -979,27 +844,13 @@ async function sendTicketRequest(interaction, serviceKey, priorityKey, title, de
             new ButtonBuilder().setCustomId(`reject_ticket_${reqMsg.id}_${member.user.id}`).setLabel('رفض').setStyle(ButtonStyle.Danger).setEmoji('❌')
         )]});
         pendingTickets.set(reqMsg.id, { userId: member.user.id, serviceKey, priorityKey, title, description, guildId: guild.id, requestedAt: Date.now() });
-
         setTimeout(async () => {
             if (!pendingTickets.has(reqMsg.id)) return;
             const logs = guild.channels.cache.get(LOGS_CHANNEL_ID);
-            if (logs) await logs.send({ content: `<@&${MANAGER_ROLE_ID}>`, embeds: [new EmbedBuilder().setColor('#ED4245')
-                .setTitle('⏰ طلب لم يُقبل!').setDescription(`طلب ${member} لم يُقبل منذ **15 دقيقة**!`)
-                .addFields({ name: '📌 العنوان', value: title }).setTimestamp()
-            ]}).catch(()=>{});
+            if (logs) await logs.send({ content: `<@&${MANAGER_ROLE_ID}>`, embeds: [new EmbedBuilder().setColor('#ED4245').setTitle('⏰ طلب لم يُقبل!').setDescription(`طلب ${member} لم يُقبل منذ **15 دقيقة**!`).addFields({ name: '📌 العنوان', value: title }).setTimestamp()] }).catch(()=>{});
         }, 15*60*1000);
-
-        await interaction.editReply({ embeds: [new EmbedBuilder().setColor('#57F287').setTitle('✅ تم إرسال طلبك!')
-            .setDescription(`طلبك وصل للإدارة.\n\n⏱️ متوسط الرد: دقائق معدودة\n📌 \`-تكتي\` لمعرفة الحالة\n🚫 \`-إلغاء\` لإلغاء الطلب`)
-        ]});
-        await sendLog(guild, new EmbedBuilder().setColor(pInfo.color).setTitle('📥 طلب تكت جديد')
-            .addFields(
-                { name: '👤 العضو', value: `${member}`, inline:true },
-                { name: '🛎️ الخدمة', value: sInfo.label, inline:true },
-                { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true },
-                { name: '📌 العنوان', value: title }
-            ).setTimestamp()
-        );
+        await interaction.editReply({ embeds: [new EmbedBuilder().setColor('#57F287').setTitle('✅ تم إرسال طلبك!').setDescription(`طلبك وصل للإدارة.\n\n⏱️ متوسط الرد: دقائق معدودة\n📌 \`-تكتي\` لمعرفة الحالة\n🚫 \`-إلغاء\` لإلغاء الطلب`)] });
+        await sendLog(guild, new EmbedBuilder().setColor(pInfo.color).setTitle('📥 طلب تكت جديد').addFields({ name: '👤 العضو', value: `${member}`, inline:true }, { name: '🛎️ الخدمة', value: sInfo.label, inline:true }, { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true }, { name: '📌 العنوان', value: title }).setTimestamp());
     } catch (e) { console.error('فشل إرسال طلب التكت:', e); await interaction.editReply({ content: '❌ حدث خطأ.' }); }
 }
 
@@ -1008,9 +859,9 @@ async function sendTicketRequest(interaction, serviceKey, priorityKey, title, de
 // ===============================================
 
 async function openTicket(interaction, data, adminUser) {
-    const guild  = interaction.guild;
-    const sInfo  = SERVICE_OPTIONS[data.serviceKey]  || SERVICE_OPTIONS.general_ticket;
-    const pInfo  = PRIORITY_OPTIONS[data.priorityKey] || PRIORITY_OPTIONS.normal;
+    const guild = interaction.guild;
+    const sInfo = SERVICE_OPTIONS[data.serviceKey]  || SERVICE_OPTIONS.general_ticket;
+    const pInfo = PRIORITY_OPTIONS[data.priorityKey] || PRIORITY_OPTIONS.normal;
     let member; try { member = await guild.members.fetch(data.userId); } catch { return interaction.editReply({ content: '❌ العضو غير موجود.' }); }
     try {
         const chName = `${pInfo.emoji}${sInfo.categoryName}-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g,'')}`.substring(0,100);
@@ -1028,31 +879,16 @@ async function openTicket(interaction, data, adminUser) {
         ticketOwnerMap.set(ch.id, member.user.id);
         lastMemberMessage.set(ch.id, Date.now());
         addPoint(adminUser.id, adminUser.tag);
-
         await ch.send({
             content: `${member} | ${adminUser}`,
-            embeds: [new EmbedBuilder().setColor(pInfo.color).setTitle(`${sInfo.emoji} ${sInfo.label}`)
-                .setThumbnail(member.user.displayAvatarURL({dynamic:true}))
-                .addFields(
-                    { name: '👤 صاحب الطلب', value: `${member}`, inline:true },
-                    { name: '🛡️ الإداري',    value: `${adminUser}`, inline:true },
-                    { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true },
-                    { name: '📌 العنوان',     value: data.title, inline:false },
-                    { name: '📝 التفاصيل',   value: data.description, inline:false },
-                    { name: '🕐 وقت الفتح',  value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline:false }
-                ).setFooter({ text: 'أوامر: -ترك | -إضافة @شخص | -نقل @إداري | -تعليق نص' }).setTimestamp()
+            embeds: [new EmbedBuilder().setColor(pInfo.color).setTitle(`${sInfo.emoji} ${sInfo.label}`).setThumbnail(member.user.displayAvatarURL({dynamic:true}))
+                .addFields({ name: '👤 صاحب الطلب', value: `${member}`, inline:true }, { name: '🛡️ الإداري', value: `${adminUser}`, inline:true }, { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true }, { name: '📌 العنوان', value: data.title, inline:false }, { name: '📝 التفاصيل', value: data.description, inline:false }, { name: '🕐 وقت الفتح', value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline:false })
+                .setFooter({ text: 'أوامر: -ترك | -إضافة @شخص | -نقل @إداري | -تعليق نص' }).setTimestamp()
             ],
             components: [createTicketComponents()]
         });
         await interaction.editReply({ content: `✅ فُتح التكت! ${ch}` });
-        await sendLog(guild, new EmbedBuilder().setColor('#57F287').setTitle('✅ تكت مفتوح')
-            .addFields(
-                { name: '👤 العضو', value: `${member}`, inline:true },
-                { name: '🛡️ الإداري', value: `${adminUser}`, inline:true },
-                { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true },
-                { name: '📋 القناة', value: `${ch}`, inline:false }
-            ).setTimestamp()
-        );
+        await sendLog(guild, new EmbedBuilder().setColor('#57F287').setTitle('✅ تكت مفتوح').addFields({ name: '👤 العضو', value: `${member}`, inline:true }, { name: '🛡️ الإداري', value: `${adminUser}`, inline:true }, { name: `${pInfo.emoji} الأولوية`, value: pInfo.label, inline:true }, { name: '📋 القناة', value: `${ch}`, inline:false }).setTimestamp());
     } catch (e) { console.error('فشل فتح التكت:', e); await interaction.editReply({ content: '❌ حدث خطأ.' }); }
 }
 
@@ -1062,53 +898,32 @@ async function openTicket(interaction, data, adminUser) {
 
 async function handleTicketClose(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID) && !isBotAdmin(interaction.user.id) && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator))
+    if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID)&&!isBotAdmin(interaction.user.id)&&!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator))
         return interaction.editReply({ content: '❌ للإداريين فقط.' });
     const ch = interaction.channel, oid = ch.topic;
     if (!oid) return interaction.editReply({ content: '❌ هذه القناة ليست تكت.' });
-    const cl   = ticketClaimer.get(ch.id);
-    const ot   = ticketOpenTime.get(ch.id);
-    const dur  = ot ? formatDuration(Date.now()-ot) : 'غير معروف';
+    const cl  = ticketClaimer.get(ch.id);
+    const ot  = ticketOpenTime.get(ch.id);
+    const dur = ot ? formatDuration(Date.now()-ot) : 'غير معروف';
     try {
         const owner = await interaction.guild.members.fetch(oid).catch(()=>null);
         let dmSent  = false;
         if (owner) {
-            await owner.send({ embeds: [new EmbedBuilder().setColor('#5865F2')
-                .setAuthor({ name: interaction.guild.name, iconURL: interaction.guild.iconURL({dynamic:true}) })
-                .setTitle('🔒 تم إغلاق تكتك')
+            await owner.send({ embeds: [new EmbedBuilder().setColor('#5865F2').setAuthor({ name: interaction.guild.name, iconURL: interaction.guild.iconURL({dynamic:true}) }).setTitle('🔒 تم إغلاق تكتك')
                 .setDescription(`مرحباً **${owner.user.username}** 👋\n\nتم إغلاق تكتك. شكراً على تواصلك!`)
-                .addFields(
-                    { name: '📋 التكت', value: `\`${ch.name}\``, inline:true },
-                    { name: '🔒 بواسطة', value: `\`${interaction.user.tag}\``, inline:true },
-                    { name: '⏱️ المدة', value: dur, inline:true }
-                ).setTimestamp()
+                .addFields({ name: '📋 التكت', value: `\`${ch.name}\``, inline:true }, { name: '🔒 بواسطة', value: `\`${interaction.user.tag}\``, inline:true }, { name: '⏱️ المدة', value: dur, inline:true }).setTimestamp()
             ]}).then(()=>{ dmSent=true; }).catch(()=>{});
             setTimeout(async () => {
                 await owner.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('⭐ كيف كانت تجربتك؟')
-                    .setDescription(`نتمنى نسمع رأيك عن الخدمة المقدمة!`)
-                    .addFields(
-                        { name: '🛡️ الإداري', value: cl ? `\`${cl.adminTag}\`` : 'غير محدد', inline: true },
-                        { name: '📋 التكت', value: `\`${ch.name}\``, inline: true },
-                        { name: '⏱️ المدة', value: dur, inline: true }
-                    )
-                    .setFooter({ text: 'اختر تقييمك من الأزرار أدناه • يمكنك إضافة ملاحظة أيضاً' })
-                ], components: [
-                    createRatingComponents(),
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId(`dm_note_${oid}_${ch.id}`).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝')
-                    )
-                ]}).catch(()=>{});
-            }, 30 * 60 * 1000);
+                    .setDescription(`نتمنى نسمع رأيك!`)
+                    .addFields({ name: '🛡️ الإداري', value: cl?`\`${cl.adminTag}\``:'غير محدد', inline:true }, { name: '📋 التكت', value: `\`${ch.name}\``, inline:true }, { name: '⏱️ المدة', value: dur, inline:true })
+                    .setFooter({ text: 'اختر تقييمك من الأزرار أدناه' })
+                ], components: [createRatingComponents(), new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`dm_note_${oid}_${ch.id}`).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝'))]
+                }).catch(()=>{});
+            }, 30*60*1000);
         }
         await sendLog(interaction.guild, new EmbedBuilder().setColor(dmSent?'#57F287':'#ED4245').setTitle('🔒 تكت مُغلق')
-            .addFields(
-                { name: '👤 صاحب التكت', value: `<@${oid}>`, inline:true },
-                { name: '🔒 بواسطة',     value: `\`${interaction.user.tag}\``, inline:true },
-                { name: '⏱️ المدة',       value: dur, inline:true },
-                { name: '📋 القناة',      value: `\`${ch.name}\``, inline:true },
-                { name: '🛡️ الإداري',    value: cl?`\`${cl.adminTag}\``:'لم يُتولى', inline:true },
-                { name: '📨 DM',           value: dmSent?'✅':'❌', inline:true }
-            ).setTimestamp()
+            .addFields({ name: '👤 صاحب التكت', value: `<@${oid}>`, inline:true }, { name: '🔒 بواسطة', value: `\`${interaction.user.tag}\``, inline:true }, { name: '⏱️ المدة', value: dur, inline:true }, { name: '📋 القناة', value: `\`${ch.name}\``, inline:true }, { name: '🛡️ الإداري', value: cl?`\`${cl.adminTag}\``:'لم يُتولى', inline:true }, { name: '📨 DM', value: dmSent?'✅':'❌', inline:true }).setTimestamp()
         );
         setTimeout(async () => {
             await ch.permissionOverwrites.edit(oid, { ViewChannel: false }).catch(()=>{});
@@ -1124,22 +939,11 @@ async function handleTicketClose(interaction) {
 
 async function archiveChannel(ch, interaction, oid, duration) {
     try {
-        ticketOpenTime.delete(ch.id);
-        ticketOwnerMap.delete(ch.id); lastMemberMessage.delete(ch.id); reminderSent.delete(ch.id);
+        ticketOpenTime.delete(ch.id); ticketOwnerMap.delete(ch.id); lastMemberMessage.delete(ch.id); reminderSent.delete(ch.id);
         await ch.setParent(ARCHIVE_CATEGORY_ID, { lockPermissions: false });
         await ch.setName(`closed-${ch.name.replace(/^[🟢🟡🔴]/,'')}`);
-        await ch.permissionOverwrites.set([
-            { id: ch.guild.id,   deny:  [PermissionsBitField.Flags.ViewChannel] },
-            { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel] }
-        ]);
-        await sendLog(interaction.guild, new EmbedBuilder().setColor('#747F8D').setTitle('📁 تكت مؤرشف')
-            .addFields(
-                { name: '👤 صاحب التكت', value: `<@${oid}>`, inline:true },
-                { name: '🔒 بواسطة',     value: `\`${interaction.user.tag}\``, inline:true },
-                { name: '⏱️ المدة',       value: duration||'غير معروف', inline:true },
-                { name: '📋 القناة',      value: `\`${ch.name}\``, inline:false }
-            ).setTimestamp()
-        );
+        await ch.permissionOverwrites.set([{ id: ch.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }, { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel] }]);
+        await sendLog(interaction.guild, new EmbedBuilder().setColor('#747F8D').setTitle('📁 تكت مؤرشف').addFields({ name: '👤 صاحب التكت', value: `<@${oid}>`, inline:true }, { name: '🔒 بواسطة', value: `\`${interaction.user.tag}\``, inline:true }, { name: '⏱️ المدة', value: duration||'غير معروف', inline:true }, { name: '📋 القناة', value: `\`${ch.name}\``, inline:false }).setTimestamp());
     } catch (e) { console.error('فشل الأرشفة:', e); }
 }
 
@@ -1148,72 +952,37 @@ async function archiveChannel(ch, interaction, oid, duration) {
 // ===============================================
 
 async function handleRating(interaction) {
-    const stars = parseInt(interaction.customId.replace('rate_', ''));
-    const txt = '⭐'.repeat(stars);
+    const stars = parseInt(interaction.customId.replace('rate_',''));
+    const txt   = '⭐'.repeat(stars);
     const guild = client.guilds.cache.first();
-
-    let aid = null;
-    let adminTag = 'غير محدد';
+    let aid = null, adminTag = 'غير محدد';
     const embedFields = interaction.message.embeds[0]?.fields || [];
-
     for (const field of embedFields) {
         if (field.name.includes('الإداري')) {
             const tagMatch = field.value.match(/`([^`]+)`/);
-            if (tagMatch) {
-                adminTag = tagMatch[1];
-                if (guild) {
-                    const m = guild.members.cache.find(x => x.user.tag === adminTag || x.user.username === adminTag);
-                    if (m) { aid = m.id; adminTag = m.user.tag; }
-                }
-            }
+            if (tagMatch) { adminTag = tagMatch[1]; const m = guild?.members.cache.find(x=>x.user.tag===adminTag||x.user.username===adminTag); if (m) { aid=m.id; adminTag=m.user.tag; } }
             const mentionMatch = field.value.match(/<@!?(\d+)>/);
-            if (mentionMatch && !aid) {
-                aid = mentionMatch[1];
-                try { const u = await client.users.fetch(aid); adminTag = u.tag; } catch {}
-            }
+            if (mentionMatch&&!aid) { aid=mentionMatch[1]; try { const u=await client.users.fetch(aid); adminTag=u.tag; } catch {} }
             break;
         }
     }
-
     if (!aid) {
         const noteBtn = interaction.message.components?.[1]?.components?.[0];
-        if (noteBtn && noteBtn.customId && noteBtn.customId.startsWith('dm_note_')) {
-            const noteParts = noteBtn.customId.replace('dm_note_', '').split('_');
-            if (noteParts.length >= 2) {
-                const chId = noteParts[noteParts.length - 1];
-                const claimer = ticketClaimer.get(chId);
-                if (claimer) { aid = claimer.adminId; adminTag = claimer.adminTag; }
-            }
+        if (noteBtn?.customId?.startsWith('dm_note_')) {
+            const noteParts = noteBtn.customId.replace('dm_note_','').split('_');
+            const chId = noteParts[noteParts.length-1];
+            const claimer = ticketClaimer.get(chId);
+            if (claimer) { aid=claimer.adminId; adminTag=claimer.adminTag; }
         }
     }
-
-    if (!aid && adminTag !== 'غير محدد') {
-        for (const [adminId, data] of Object.entries(db.points)) {
-            if (data.tag === adminTag) { aid = adminId; break; }
-        }
-    }
-
+    if (!aid&&adminTag!=='غير محدد') { for (const [id,d] of Object.entries(db.points)) { if (d.tag===adminTag) { aid=id; break; } } }
     if (aid) storeRating(aid, adminTag, stars, 'تكت', interaction.user.tag);
-
     const noteId = interaction.message.components?.[1]?.components?.[0]?.customId || 'dm_note_done';
-
     await interaction.update({
-        embeds: [new EmbedBuilder().setColor('#57F287').setTitle('✅ تم تسجيل تقييمك')
-            .setDescription(`${txt} **(${stars}/5)**\n\n${aid ? `🛡️ الإداري: <@${aid}> (\`${adminTag}\`)` : '🛡️ الإداري: غير محدد'}\n\n**شكراً لك!** رأيك يساعدنا على التحسين. 😊`)
-            .setTimestamp()
-        ],
-        components: [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(noteId).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝')
-        )]
+        embeds: [new EmbedBuilder().setColor('#57F287').setTitle('✅ تم تسجيل تقييمك').setDescription(`${txt} **(${stars}/5)**\n\n${aid?`🛡️ الإداري: <@${aid}> (\`${adminTag}\`)`:'🛡️ الإداري: غير محدد'}\n\n**شكراً لك!** 😊`).setTimestamp()],
+        components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(noteId).setLabel('إضافة ملاحظة').setStyle(ButtonStyle.Secondary).setEmoji('📝'))]
     });
-
-    await sendLog(guild, new EmbedBuilder().setColor('#FEE75C').setTitle('⭐ تقييم جديد')
-        .addFields(
-            { name: '👤 العضو', value: `\`${interaction.user.tag}\``, inline: true },
-            { name: '⭐ التقييم', value: `${txt} (${stars}/5)`, inline: true },
-            { name: '🛡️ الإداري', value: aid ? `<@${aid}> (\`${adminTag}\`)` : `\`${adminTag}\``, inline: true }
-        ).setTimestamp()
-    );
+    await sendLog(guild, new EmbedBuilder().setColor('#FEE75C').setTitle('⭐ تقييم جديد').addFields({ name: '👤 العضو', value: `\`${interaction.user.tag}\``, inline:true }, { name: '⭐ التقييم', value: `${txt} (${stars}/5)`, inline:true }, { name: '🛡️ الإداري', value: aid?`<@${aid}> (\`${adminTag}\`)`:`\`${adminTag}\``, inline:true }).setTimestamp());
 }
 
 // ===============================================
@@ -1223,13 +992,8 @@ async function handleRating(interaction) {
 client.on('guildMemberRemove', async member => {
     const ot = member.guild.channels.cache.find(c=>c.topic===member.id&&!c.name.startsWith('closed-'));
     if (!ot) return;
-    await member.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('⚠️ غادرت السيرفر ولديك تكت!')
-        .setDescription(`مرحباً **${member.user.username}**،\n\nلاحظنا مغادرتك **${member.guild.name}** ولا يزال لديك تكت مفتوح:\n\`${ot.name}\`\n\nيمكنك العودة لمتابعة طلبك.`)
-        .setTimestamp()
-    ]}).catch(()=>{});
-    await sendLog(member.guild, new EmbedBuilder().setColor('#FEE75C').setTitle('🚪 عضو غادر وله تكت مفتوح')
-        .addFields({ name: '👤 العضو', value: `\`${member.user.tag}\``, inline:true }, { name: '📋 التكت', value: `${ot}`, inline:true }).setTimestamp()
-    );
+    await member.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('⚠️ غادرت السيرفر ولديك تكت!').setDescription(`مرحباً **${member.user.username}**،\n\nلاحظنا مغادرتك **${member.guild.name}** ولا يزال لديك تكت مفتوح:\n\`${ot.name}\`\n\nيمكنك العودة لمتابعة طلبك.`).setTimestamp()] }).catch(()=>{});
+    await sendLog(member.guild, new EmbedBuilder().setColor('#FEE75C').setTitle('🚪 عضو غادر وله تكت مفتوح').addFields({ name: '👤 العضو', value: `\`${member.user.tag}\``, inline:true }, { name: '📋 التكت', value: `${ot}`, inline:true }).setTimestamp());
 });
 
 // ===============================================
@@ -1241,12 +1005,11 @@ process.on('unhandledRejection', err => {
     console.error('Unhandled rejection:', err);
 });
 
+process.on('uncaughtException', err => {
+    console.error('Uncaught Exception:', err);
+});
+
 client.login(BOT_TOKEN).catch(err => {
     console.error('❌ فشل تسجيل الدخول:', err.message);
     process.exit(1);
 });
-
-const app  = express();
-const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(port, () => console.log(`Web Server on port ${port}`));
