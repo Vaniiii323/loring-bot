@@ -1,6 +1,3 @@
-
-
-```javascript
 // index.js — النسخة المُحدثة الكاملة (بوت تكت سيرفر)
 
 const {
@@ -1202,4 +1199,3 @@ async function startBot(retries = 10) {
 }
 
 startBot();
-```
