@@ -17,6 +17,9 @@ const BOT_TOKEN       = process.env.BOT_TOKEN;
 const MANAGER_ROLE_ID = process.env.MANAGER_ROLE_ID;
 const PREFIX          = '-';
 
+console.log('🔍 TOKEN exists:', !!BOT_TOKEN);
+console.log('🔍 MANAGER_ROLE_ID exists:', !!MANAGER_ROLE_ID);
+
 const LOGS_CHANNEL_ID     = '1449444036824797334';
 const ARCHIVE_CATEGORY_ID = '1449459496144470056';
 const REQUESTS_CHANNEL_ID = '1477338804502266079';
@@ -353,7 +356,6 @@ client.on('ready', () => {
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
-    // تتبع آخر رسالة للعضو داخل تكته
     if (message.guild && message.channel.topic === message.author.id) {
         lastMemberMessage.set(message.channel.id, Date.now());
         reminderSent.delete(message.channel.id);
@@ -367,14 +369,12 @@ client.on('messageCreate', async message => {
     const isAdm  = message.member.permissions.has(PermissionsBitField.Flags.Administrator) || isBotSupervisor(message.author.id);
     const isOwn  = message.member.permissions.has(PermissionsBitField.Flags.Administrator) || isBotOwner(message.author.id) || message.guild.ownerId === message.author.id;
 
-    // ─── setup ───
     if (cmd === 'setup') {
         if (!isAdm) return message.reply({ content: '❌ لا تملك صلاحية.' });
         try { await message.channel.send({ content: TICKET_IMAGE_URL, components: createSetupComponents() }); await message.delete().catch(()=>{}); }
         catch { await message.reply({ content: '❌ حدث خطأ.' }); }
     }
 
-    // ─── إعداد_تحكم ───
     if (cmd === 'إعداد_تحكم') {
         if (!isOwn) return message.reply({ content: '❌ للمالكين والأدمن فقط.' });
         try {
@@ -393,7 +393,6 @@ client.on('messageCreate', async message => {
         } catch (e) { console.error(e); await message.reply({ content: '❌ فشل إنشاء لوحة التحكم.' }); }
     }
 
-    // ─── إحصائيات ───
     if (cmd === 'إحصائيات') {
         if (!isAdm) return message.reply({ content: '❌ للمسؤولين فقط.' });
 
@@ -421,7 +420,7 @@ client.on('messageCreate', async message => {
         if ((!d || !d.count) && !p) {
             return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245')
                 .setAuthor({ name: u.tag, iconURL: u.displayAvatarURL({ dynamic: true }) })
-                .setDescription(`❌ لا توجد بيانات لـ **${u.tag}** حتى الآن.\n\nلا تقييمات ولا نقاط مسجلة.`)
+                .setDescription(`❌ لا توجد بيانات لـ **${u.tag}** حتى الآن.`)
                 .setTimestamp()
             ]});
         }
@@ -437,7 +436,6 @@ client.on('messageCreate', async message => {
             : '> لا توجد تقييمات مسجلة بعد';
 
         const absStatus = isAbsent(tid) ? '🔴 غائب' : '🟢 متاح';
-
         const botRole = getBotRole(tid);
         const roleLabel = botRole === 3 ? '👑 مالك' : botRole === 2 ? '🔱 مشرف' : botRole === 1 ? '🛡️ إداري' : '👤 عضو';
 
@@ -462,7 +460,6 @@ client.on('messageCreate', async message => {
         ]});
     }
 
-    // ─── نقاطي ───
     if (cmd === 'نقاطي') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const p = db.points[message.author.id];
@@ -477,7 +474,6 @@ client.on('messageCreate', async message => {
         ]});
     }
 
-    // ─── نقاط ───
     if (cmd === 'نقاط') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const sorted = Object.entries(db.points).sort((a,b)=>b[1].count-a[1].count);
@@ -489,7 +485,6 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('🏆 لوحة النقاط').setDescription(list).setTimestamp()] });
     }
 
-    // ─── تكتي ───
     if (cmd === 'تكتي') {
         const t = message.guild.channels.cache.find(c=>c.topic===message.author.id&&!c.name.startsWith('closed-'));
         if (!t) return message.reply({ embeds: [new EmbedBuilder().setColor('#ED4245').setDescription('❌ ليس لديك تكت مفتوح.')] });
@@ -503,7 +498,6 @@ client.on('messageCreate', async message => {
         ]});
     }
 
-    // ─── إلغاء ───
     if (cmd === 'إلغاء') {
         const entry = [...pendingTickets.entries()].find(([,v])=>v.userId===message.author.id);
         if (!entry) return message.reply({ content: '❌ ليس لديك طلب معلق.' });
@@ -513,7 +507,6 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription('✅ تم إلغاء طلبك.')] });
     }
 
-    // ─── ترك ───
     if (cmd === 'ترك') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const ch = message.channel, oid = ch.topic, cl = ticketClaimer.get(ch.id);
@@ -531,7 +524,6 @@ client.on('messageCreate', async message => {
         await message.delete().catch(()=>{});
     }
 
-    // ─── إضافة ───
     if (cmd === 'إضافة') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         if (!message.channel.topic) return message.reply({ content: '❌ هذه القناة ليست تكت.' });
@@ -545,7 +537,6 @@ client.on('messageCreate', async message => {
         await message.delete().catch(()=>{});
     }
 
-    // ─── نقل ───
     if (cmd === 'نقل') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const ch = message.channel; if (!ch.topic) return message.reply({ content: '❌ هذه القناة ليست تكت.' });
@@ -563,7 +554,6 @@ client.on('messageCreate', async message => {
         await message.delete().catch(()=>{});
     }
 
-    // ─── تعليق ───
     if (cmd === 'تعليق') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         if (!message.channel.topic) return message.reply({ content: '❌ هذه القناة ليست تكت.' });
@@ -572,7 +562,6 @@ client.on('messageCreate', async message => {
         await message.channel.send({ embeds: [new EmbedBuilder().setColor('#747F8D').setTitle('📝 ملاحظة داخلية').setDescription(text).setFooter({ text: `بواسطة ${message.author.tag} — مرئي للإداريين فقط` }).setTimestamp()] });
     }
 
-    // ─── قفل ───
     if (cmd === 'قفل') {
         if (!isAdm) return message.reply({ content: '❌ للمسؤولين فقط.' });
         const reason = args.join(' ')||'لا يوجد سبب'; setSetting('locked', true);
@@ -581,7 +570,6 @@ client.on('messageCreate', async message => {
         await refreshControlPanel(message.guild);
     }
 
-    // ─── فتح ───
     if (cmd === 'فتح') {
         if (!isAdm) return message.reply({ content: '❌ للمسؤولين فقط.' });
         setSetting('locked', false);
@@ -590,50 +578,14 @@ client.on('messageCreate', async message => {
         await refreshControlPanel(message.guild);
     }
 
-    // ─── تذكير ───
     if (cmd === 'تذكير') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const h = parseInt(args[0]);
-        if (!h || h < 1 || h > 72) return message.reply({ content: '❌ الاستخدام: `-تذكير 2` (من 1 إلى 72)' });
+        if (!h||h<1||h>72) return message.reply({ content: '❌ الاستخدام: `-تذكير 2` (من 1 إلى 72)' });
         setSetting('reminderHours', h);
-        await message.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription(`✅ وقت التذكير → **${h} ساعة**\n\n⏳ جاري إرسال التذكيرات الآن للتكتات المتأخرة...`)] });
-
-        let sentCount = 0;
-        for (const [cid, lastTime] of lastMemberMessage.entries()) {
-            if (Date.now() - lastTime < h * 3600000) continue;
-            const ch = message.guild.channels.cache.get(cid);
-            if (!ch || ch.name.startsWith('closed-')) {
-                lastMemberMessage.delete(cid);
-                continue;
-            }
-            const ownerId = ch.topic;
-            if (!ownerId) continue;
-            const owner = await message.guild.members.fetch(ownerId).catch(() => null);
-            if (!owner) continue;
-
-            reminderSent.add(cid);
-            await owner.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setTitle('⏰ تذكير — لديك تكت مفتوح!')
-                .setDescription(`مرحباً **${owner.user.username}**،\n\nلم يتم الرد على تكتك منذ فترة.\nالرجاء التفاعل وإلا قد يُغلق.`)
-                .addFields(
-                    { name: '📋 التكت', value: `\`${ch.name}\``, inline: true },
-                    { name: '⏱️ آخر رد منك', value: `<t:${Math.floor(lastTime / 1000)}:R>`, inline: true }
-                ).setTimestamp()
-            ]}).catch(() => {});
-
-            await ch.send({ embeds: [new EmbedBuilder().setColor('#FEE75C')
-                .setDescription(`⏰ **تم إرسال تذكير لـ <@${ownerId}> — آخر رد كان <t:${Math.floor(lastTime / 1000)}:R>**`).setTimestamp()
-            ]}).catch(() => {});
-            sentCount++;
-        }
-
-        if (sentCount === 0) {
-            await message.channel.send({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription('✅ لا توجد تكتات متأخرة حالياً. الإعداد تم حفظه.')] });
-        } else {
-            await message.channel.send({ embeds: [new EmbedBuilder().setColor('#FEE75C').setDescription(`📨 تم إرسال **${sentCount}** تذكير للأعضاء المتأخرين.`)] });
-        }
+        await message.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription(`✅ وقت التذكير → **${h} ساعة**`)] });
     }
 
-    // ─── غائب / متاح ───
     if (cmd === 'غائب') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         if (!db.absents) db.absents = [];
@@ -646,7 +598,6 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [new EmbedBuilder().setColor('#57F287').setDescription(`🟢 **${message.author.username}** الآن **متاح**.`)] });
     }
 
-    // ─── حالة ───
     if (cmd === 'حالة') {
         if (!isMgr) return message.reply({ content: '❌ للإداريين فقط.' });
         const sub = args[0]?.toLowerCase(), text = args.slice(1).join(' ');
@@ -670,7 +621,6 @@ client.on('messageCreate', async message => {
         ]});
     }
 
-    // ─── مساعدة ───
     if (cmd === 'مساعدة') {
         const f = [];
         f.push({ name: '👤 أوامر الأعضاء', value: '`-تكتي` — حالة تكتك\n`-إلغاء` — إلغاء طلب معلق', inline: false });
@@ -687,7 +637,6 @@ client.on('messageCreate', async message => {
 client.on('interactionCreate', async interaction => {
   try {
 
-    // ── فتح القائمة ──
     if (interaction.isButton() && interaction.customId === 'open_ticket_menu') {
         if (getSetting('locked', false))
             return interaction.reply({ content: '🔒 نظام التكتات مغلق مؤقتاً.', flags: MessageFlags.Ephemeral });
@@ -700,7 +649,6 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply({ content: '👇 اختر نوع الخدمة:', components: createSelectMenuComponents(), flags: MessageFlags.Ephemeral });
     }
 
-    // ── اختيار الخدمة ──
     if (interaction.isStringSelectMenu() && interaction.customId === 'service_select_menu') {
         return interaction.update({
             content: `✅ اخترت: **${SERVICE_OPTIONS[interaction.values[0]].label}**\n\n👇 حدد مستوى الأهمية:`,
@@ -713,7 +661,6 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    // ── اختيار الأولوية → Modal ──
     if (interaction.isStringSelectMenu() && interaction.customId === 'priority_select_menu') {
         const backBtn    = interaction.message.components[1]?.components[0];
         const serviceKey = backBtn?.customId?.replace('back_service_','') || 'general_ticket';
@@ -728,11 +675,9 @@ client.on('interactionCreate', async interaction => {
         );
     }
 
-    // ── رجوع ──
     if (interaction.isButton() && interaction.customId.startsWith('back_service_'))
         return interaction.update({ content: '👇 اختر نوع الخدمة:', components: createSelectMenuComponents() });
 
-    // ── Modal التكت ──
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
         const parts = interaction.customId.replace('ticket_modal_','').split('_');
         const pKey  = parts.pop(), sKey = parts.join('_');
@@ -742,7 +687,6 @@ client.on('interactionCreate', async interaction => {
         );
     }
 
-    // ── قبول التكت ──
     if (interaction.isButton() && interaction.customId.startsWith('accept_ticket_')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         if (!interaction.member.roles.cache.has(MANAGER_ROLE_ID) && !isBotAdmin(interaction.user.id) && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator))
@@ -767,7 +711,6 @@ client.on('interactionCreate', async interaction => {
         await openTicket(interaction, data, interaction.user);
     }
 
-    // ── رفض التكت ──
     if (interaction.isButton() && interaction.customId.startsWith('reject_ticket_')) {
         const msgId = interaction.customId.split('_')[2];
         if (!pendingTickets.has(msgId)) return interaction.reply({ content: '❌ الطلب لم يعد متاحاً.', flags: MessageFlags.Ephemeral });
@@ -794,13 +737,9 @@ client.on('interactionCreate', async interaction => {
         await interaction.editReply({ content: '✅ تم الرفض وإبلاغ العضو.' });
     }
 
-    // ── إغلاق ──
     if (interaction.isButton() && interaction.customId === 'close_ticket') return handleTicketClose(interaction);
-
-    // ── التقييم ──
     if (interaction.isButton() && interaction.customId.startsWith('rate_')) return handleRating(interaction);
 
-    // ── ملاحظة DM ──
     if (interaction.isButton() && interaction.customId.startsWith('dm_note_')) {
         return interaction.showModal(new ModalBuilder().setCustomId(`note_modal_${interaction.customId.replace('dm_note_','')}`).setTitle('📝 ملاحظة للإدارة')
             .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('note_text').setLabel('ملاحظتك').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500)))
@@ -814,10 +753,6 @@ client.on('interactionCreate', async interaction => {
             .addFields({ name: '👤 العضو', value: `${interaction.user}`, inline:true }, { name: '📋 التكت', value: `\`${cid}\``, inline:true }, { name: '💬 الملاحظة', value: note }).setTimestamp()
         );
     }
-
-    // ════════════════════════════════════
-    // لوحة التحكم — أزرار
-    // ════════════════════════════════════
 
     if (interaction.isButton() && interaction.customId.startsWith('ctrl_')) {
         if (!hasPermission(interaction.member, 2))
@@ -913,10 +848,6 @@ client.on('interactionCreate', async interaction => {
             ]});
         }
     }
-
-    // ════════════════════════════════════
-    // لوحة التحكم — Modals
-    // ════════════════════════════════════
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ctrl_modal_')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -1194,7 +1125,6 @@ async function archiveChannel(ch, interaction, oid, duration) {
     try {
         ticketOpenTime.delete(ch.id);
         ticketOwnerMap.delete(ch.id); lastMemberMessage.delete(ch.id); reminderSent.delete(ch.id);
-        // لا نحذف ticketClaimer هنا عشان التقييم يقدر يلاقي الإداري
         await ch.setParent(ARCHIVE_CATEGORY_ID, { lockPermissions: false });
         await ch.setName(`closed-${ch.name.replace(/^[🟢🟡🔴]/,'')}`);
         await ch.permissionOverwrites.set([
@@ -1224,9 +1154,7 @@ async function handleRating(interaction) {
     let aid = null;
     let adminTag = 'غير محدد';
     const embedFields = interaction.message.embeds[0]?.fields || [];
-    const embedDesc = interaction.message.embeds[0]?.description || '';
 
-    // طريقة 1: البحث في الحقول عن اسم الإداري
     for (const field of embedFields) {
         if (field.name.includes('الإداري')) {
             const tagMatch = field.value.match(/`([^`]+)`/);
@@ -1246,19 +1174,6 @@ async function handleRating(interaction) {
         }
     }
 
-    // طريقة 2: البحث في الوصف
-    if (!aid) {
-        const descTagMatch = embedDesc.match(/`([^`\n]+)`/);
-        if (descTagMatch) {
-            adminTag = descTagMatch[1];
-            if (guild) {
-                const m = guild.members.cache.find(x => x.user.tag === adminTag || x.user.username === adminTag);
-                if (m) { aid = m.id; adminTag = m.user.tag; }
-            }
-        }
-    }
-
-    // طريقة 3: البحث من ticketClaimer عبر زر الملاحظة
     if (!aid) {
         const noteBtn = interaction.message.components?.[1]?.components?.[0];
         if (noteBtn && noteBtn.customId && noteBtn.customId.startsWith('dm_note_')) {
@@ -1266,38 +1181,18 @@ async function handleRating(interaction) {
             if (noteParts.length >= 2) {
                 const chId = noteParts[noteParts.length - 1];
                 const claimer = ticketClaimer.get(chId);
-                if (claimer) {
-                    aid = claimer.adminId;
-                    adminTag = claimer.adminTag;
-                }
+                if (claimer) { aid = claimer.adminId; adminTag = claimer.adminTag; }
             }
         }
     }
 
-    // طريقة 4: بحث في بيانات النقاط لمطابقة الـ tag
     if (!aid && adminTag !== 'غير محدد') {
         for (const [adminId, data] of Object.entries(db.points)) {
-            if (data.tag === adminTag) {
-                aid = adminId;
-                break;
-            }
+            if (data.tag === adminTag) { aid = adminId; break; }
         }
     }
 
-    // طريقة 5: بحث في botUsers
-    if (!aid && adminTag !== 'غير محدد') {
-        for (const [adminId, data] of Object.entries(db.botUsers)) {
-            if (data.tag === adminTag) {
-                aid = adminId;
-                break;
-            }
-        }
-    }
-
-    // تسجيل التقييم
-    if (aid) {
-        storeRating(aid, adminTag, stars, 'تكت', interaction.user.tag);
-    }
+    if (aid) storeRating(aid, adminTag, stars, 'تكت', interaction.user.tag);
 
     const noteId = interaction.message.components?.[1]?.components?.[0]?.customId || 'dm_note_done';
 
@@ -1321,7 +1216,7 @@ async function handleRating(interaction) {
 }
 
 // ===============================================
-// 12. المغادرة — تذكير العضو
+// 12. المغادرة
 // ===============================================
 
 client.on('guildMemberRemove', async member => {
@@ -1345,7 +1240,10 @@ process.on('unhandledRejection', err => {
     console.error('Unhandled rejection:', err);
 });
 
-client.login(BOT_TOKEN);
+client.login(BOT_TOKEN).catch(err => {
+    console.error('❌ فشل تسجيل الدخول:', err.message);
+    process.exit(1);
+});
 
 const app  = express();
 const port = process.env.PORT || 3000;
