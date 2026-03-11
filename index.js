@@ -1009,10 +1009,26 @@ app.get('/', (req, res) => res.send('Bot is running!'));
 
 app.listen(port, () => {
     console.log(`✅ Web Server on port ${port}`);
-    console.log('⏳ جاري تسجيل دخول البوت...');
-    console.log('🔑 التوكن موجود:', !!BOT_TOKEN);
-    client.login(BOT_TOKEN).catch(err => {
-        console.error('❌ فشل تسجيل الدخول:', err.message);
-        process.exit(1);
-    });
+
+    async function startBot(retries = 5) {
+        for (let i = 1; i <= retries; i++) {
+            try {
+                console.log(`⏳ محاولة تسجيل الدخول ${i}/${retries}...`);
+                await client.login(BOT_TOKEN);
+                console.log('✅ تم تسجيل الدخول بنجاح!');
+                return;
+            } catch (err) {
+                console.error(`❌ فشلت المحاولة ${i}:`, err.message);
+                if (i < retries) {
+                    console.log(`⏱️ انتظار 5 ثواني قبل المحاولة التالية...`);
+                    await new Promise(r => setTimeout(r, 5000));
+                } else {
+                    console.error('❌ فشلت كل المحاولات. إيقاف البوت.');
+                    process.exit(1);
+                }
+            }
+        }
+    }
+
+    startBot();
 });
