@@ -1014,3 +1014,5 @@ app.listen(port, () => {
     client.login(BOT_TOKEN).catch(err => {
         console.error('❌ فشل تسجيل الدخول:', err.message);
         process.exit(1);
+    });
+});
