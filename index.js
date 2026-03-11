@@ -19,6 +19,7 @@ const PREFIX          = '-';
 
 console.log('🔍 TOKEN exists:', !!BOT_TOKEN);
 console.log('🔍 MANAGER_ROLE_ID exists:', !!MANAGER_ROLE_ID);
+console.log('🔍 TOKEN value (first 20):', BOT_TOKEN?.substring(0, 20));
 
 const LOGS_CHANNEL_ID     = '1449444036824797334';
 const ARCHIVE_CATEGORY_ID = '1449459496144470056';
